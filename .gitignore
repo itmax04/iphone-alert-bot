@@ -1,0 +1,10 @@
+# Секреты — только локально (см. .dev.vars.example и раздел «Секреты» в README)
+.run_key
+.webhook_secret
+.dev.vars
+.env
+# Зависимости и кэш wrangler
+node_modules/
+.wrangler/
+# Системное
+.DS_Store

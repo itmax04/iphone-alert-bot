@@ -1,0 +1,22 @@
+name = "iphone-alert-bot"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Каждую минуту — 8 городов ⭐ и лента «вся Германия»; каждые 2 минуты — 15 городов ▫️ и раз в 3 ч обход MV
+# (см. cityFor/HIGH_CYCLE в src/index.js). Время — UTC. Все 5 бесплатных cron аккаунта заняты.
+[triggers]
+crons = ["* * * * *", "*/2 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "iphone-alert-bot"
+database_id = "63e4fbb5-5150-4a92-b557-3d9efab58656"
+
+[observability]
+enabled = true
+
+# Секреты (не хранятся в этом файле):
+#   TELEGRAM_TOKEN   — токен бота от @BotFather (вводит владелец сам)
+#   TELEGRAM_CHAT_ID — ваш Chat Id
+#   RUN_KEY          — ключ для ручного запуска /run?key=...
+#   WEBHOOK_SECRET   — секрет, который Telegram присылает в заголовке webhook

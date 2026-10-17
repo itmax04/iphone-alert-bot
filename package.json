@@ -1,0 +1,12 @@
+{
+  "name": "iphone-alert-bot",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker: iPhone 13+ на Kleinanzeigen по городам, MV и лучшие предложения по Германии → Telegram",
+  "scripts": {
+    "check": "node scripts/check.js",
+    "deploy": "npx --yes wrangler@4 deploy",
+    "tail": "npx --yes wrangler@4 tail iphone-alert-bot",
+    "db:schema": "npx --yes wrangler@4 d1 execute iphone-alert-bot --remote --file db/schema.sql"
+  }
+}
