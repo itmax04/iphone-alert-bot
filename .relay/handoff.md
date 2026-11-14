@@ -54,7 +54,7 @@
 - Удалённая D1 после миграции: таблица `market` пока пуста (0 строк).
 - NOT RUN: ручной пересчёт (`.run_key` локально нет; владелец решил не менять ключ — ждём ночной пересчёт 03:20 Берлин), замер `rows_read_24h`.
 
-## Сделано (этап 2: каталог моделей — код готов, НЕ закоммичен и НЕ задеплоен, 14.11.2026)
+## Сделано (этап 2: каталог моделей — закоммичен и запушен `59fa058`, deploy 14.11.2026, версия 9afeb298)
 - `src/catalog.js`: `identify(title, description)` → `{ category, model, variant, gen? }` или null; `identifyQuery(text)` — модель из команды.
   Категории: iPhone 11+, iPad (9+, Air 4+, mini 6+, Pro M1+), MacBook (Apple Silicon, ключ = линейка + диагональ + чип + RAM,
   SSD — вариант), Apple Watch (Series 7+ с размером, Ultra; вариант GPS/LTE/LTE Edelstahl/LTE Titan), Samsung (S21+, Z Fold/Flip 3+), Pixel 6+.
@@ -73,7 +73,8 @@
 - PASS `node scripts/test_models.js`: 164/164 реальных заголовка, 6/6 действующие ленты, 21/21 `/sell`, 6/6 `/price`.
 - PASS `node scripts/test_market.js` (ALL PASS). PASS `npm run check` (23 города, exit 0, без ошибок).
 - CPU: `identify` ≈ 4 мкс на объявление локально (≈ 0,1 мс на страницу из 27, а разбираются только новые).
-- NOT RUN: deploy, `npm run tail` (cpuTime в Cloudflare), `/setup`, проверка `/models` в Telegram. Независимое ревью не проводилось.
+- PASS deploy (версия 9afeb298) и `wrangler tail` после него: 3 cron-запуска, outcome ok ×3, cpuTime 7, 4, 10 мс, exceptions 0.
+- NOT RUN: `GET /setup?key=…` (локально нет `.run_key`) — команда `/models` работает, но в меню Telegram не появится, пока владелец не вызовет `/setup`; проверка `/models` в Telegram. Независимое ревью не проводилось.
 
 ## Задел на этап 3
 - Новые ленты должны брать вариант из `identify().variant`, а не из `storageOf` (он нестрогий: «265 GB», RAM вместо SSD).
@@ -90,7 +91,7 @@
 - Формат ссылки на категорию без ключевого слова; ключ модели для MacBook (линейка + чип + диагональ + RAM).
 
 ## Следующий шаг
-1. Владелец: одобрить commit + push и deploy этапа 2 (затем `GET /setup?key=…` для команды `/models`, `npm run tail` — cpuTime).
+1. Владелец: вызвать `GET /setup?key=<RUN_KEY>` (меню команд с `/models`) и проверить `/models` в Telegram.
 2. После ночи 15.11: проверить `SELECT COUNT(*) FROM market` (должно быть > 0), `npx --yes wrangler@4 d1 info iphone-alert-bot` (rows_read_24h, цель < 1 млн; полные сутки — на 16.11) и `d1 insights --sort-by=reads`. Результат записать сюда.
 3. Этап 3 — региональные ленты: 3 региона (MV `l61`, Берлин `l3331`, Гамбург `l9409`) × телефоны+часы / планшеты / MacBook, от 150 €;
    последний номер объявления на ленту вместо таблиц seen; включить категории каталога (`ACTIVE_CATEGORIES`, `MIN_IPHONE = 11`);
