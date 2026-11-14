@@ -54,6 +54,32 @@
 - Удалённая D1 после миграции: таблица `market` пока пуста (0 строк).
 - NOT RUN: ручной пересчёт (`.run_key` локально нет; владелец решил не менять ключ — ждём ночной пересчёт 03:20 Берлин), замер `rows_read_24h`.
 
+## Сделано (этап 2: каталог моделей — код готов, НЕ закоммичен и НЕ задеплоен, 14.11.2026)
+- `src/catalog.js`: `identify(title, description)` → `{ category, model, variant, gen? }` или null; `identifyQuery(text)` — модель из команды.
+  Категории: iPhone 11+, iPad (9+, Air 4+, mini 6+, Pro M1+), MacBook (Apple Silicon, ключ = линейка + диагональ + чип + RAM,
+  SSD — вариант), Apple Watch (Series 7+ с размером, Ultra; вариант GPS/LTE/LTE Edelstahl/LTE Titan), Samsung (S21+, Z Fold/Flip 3+), Pixel 6+.
+  Отсечки: «Suche», Konvolut/2x, два разных семейства в заголовке (комплект), «für/gegen <устройство>», аксессуар без памяти, противоречия.
+- Решения владельца (14.11): (1) в действующих лентах остаются только iPhone 13+ — флаги `ACTIVE_CATEGORIES`, `MIN_IPHONE` в `src/filters.js`,
+  остальное включается на этапе 3; (2) MacBook без RAM — не распознаётся; (3) LTE/Cellular — в колонке `storage` («256 GB LTE»).
+- Ключи iPhone прежние («iPhone 13 Mini» с большой «M») — миграция D1 не нужна.
+- `src/settings.js`: `/sell` и `/price` разбирают модель через каталог (все категории); `src/commands.js`: команда `/models` (после deploy нужен `GET /setup?key=…`).
+- `scripts/test_models.js`; README и AGENTS.md обновлены.
+- Изменение поведения действующих лент (сравнение старого и нового `modelOf` на 708 живых заголовках: 677 без изменений, 31 изменён):
+  больше не распознаются комплекты iPhone + Apple Watch, «Suche…», чехлы/стёкла без памяти, «… gegen Samsung»; исправлено «ProMax» → «Pro Max»
+  (раньше ключ «Promax») и «iPhone 17 Air» → «iPhone Air» (раньше попадал в «iPhone 17»).
+
+## Проверено (этап 2)
+- PASS `node --check` для всех `src/*.js scripts/*.js`.
+- PASS `node scripts/test_models.js`: 164/164 реальных заголовка, 6/6 действующие ленты, 21/21 `/sell`, 6/6 `/price`.
+- PASS `node scripts/test_market.js` (ALL PASS). PASS `npm run check` (23 города, exit 0, без ошибок).
+- CPU: `identify` ≈ 4 мкс на объявление локально (≈ 0,1 мс на страницу из 27, а разбираются только новые).
+- NOT RUN: deploy, `npm run tail` (cpuTime в Cloudflare), `/setup`, проверка `/models` в Telegram. Независимое ревью не проводилось.
+
+## Задел на этап 3
+- Новые ленты должны брать вариант из `identify().variant`, а не из `storageOf` (он нестрогий: «265 GB», RAM вместо SSD).
+- В описании (`ld.description`) только первые ~250 символов — RAM/размер часов находятся не всегда.
+- MacBook Neo (новая линейка 2026) в каталоге нет — характеристики неизвестны; старые ключи-мусор вида «iPhone 16 Promax» в `prices` сами уйдут за 30 дней.
+
 ## Открыто
 - Сколько сообщений в день будет при новых правилах — неизвестно (поэтому режим наблюдения).
 - OLX.ua: владелец хочет сравнение с OLX. Репозиторий itmax04/iphone-deal-check берёт цены из внутреннего JSON OLX
@@ -64,5 +90,9 @@
 - Формат ссылки на категорию без ключевого слова; ключ модели для MacBook (линейка + чип + диагональ + RAM).
 
 ## Следующий шаг
-1. После ночи 15.11: проверить `SELECT COUNT(*) FROM market` (должно быть > 0), `npx --yes wrangler@4 d1 info iphone-alert-bot` (rows_read_24h, цель < 1 млн; полные сутки — на 16.11) и `d1 insights --sort-by=reads`. Результат записать сюда.
-2. Этап 2 — каталог моделей (iPhone 11+, iPad, MacBook, Watch, Samsung, Pixel): сначала дизайн ключей и план, одобрение владельца; не распознано → не присылать. Уровень strong (ключи модели для MacBook и т.п. — открытые развилки).
+1. Владелец: одобрить commit + push и deploy этапа 2 (затем `GET /setup?key=…` для команды `/models`, `npm run tail` — cpuTime).
+2. После ночи 15.11: проверить `SELECT COUNT(*) FROM market` (должно быть > 0), `npx --yes wrangler@4 d1 info iphone-alert-bot` (rows_read_24h, цель < 1 млн; полные сутки — на 16.11) и `d1 insights --sort-by=reads`. Результат записать сюда.
+3. Этап 3 — региональные ленты: 3 региона (MV `l61`, Берлин `l3331`, Гамбург `l9409`) × телефоны+часы / планшеты / MacBook, от 150 €;
+   последний номер объявления на ленту вместо таблиц seen; включить категории каталога (`ACTIVE_CATEGORIES`, `MIN_IPHONE = 11`);
+   убрать опрос 23 городов и ленту «вся Германия»; 1–2 дня режим наблюдения. Сначала план и одобрение владельца. Уровень strong
+   (расписание в пределах 5 cron и 10 мс CPU, отказ от seen — открытые развилки).

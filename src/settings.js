@@ -3,6 +3,8 @@
 //   models — максимальная цена для конкретной модели, например { "iPhone 15 Pro": 550 }.
 // Лимит модели важнее общего максимума. Объявления без цены («VB», «Zu verschenken») не отсеиваются.
 
+import { identifyQuery } from './catalog.js';
+
 const DEFAULT = { min: null, max: null, models: {} };
 
 export async function getPriceFilter(env) {
@@ -27,18 +29,6 @@ export function priceRejectReason(item, model, filter) {
   return null;
 }
 
-/** Нормализует название модели из команды: «15 pro max» → «iPhone 15 Pro Max». */
-function normalizeModel(text) {
-  const t = text
-    .replace(/^\s*(apple\s+)?i\s?phone\s*/i, '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-  if (!t) return null;
-  const words = t.split(' ').map((w) => (/^\d+e$/.test(w) ? w : w[0].toUpperCase() + w.slice(1)));
-  return `iPhone ${words.join(' ')}`;
-}
-
 /**
  * Разбор команды /price. Возвращает { filter, message } или { error }.
  *   /price            — показать
@@ -47,6 +37,7 @@ function normalizeModel(text) {
  *   /price min 80     — только минимум
  *   /price 15 Pro 550 — максимум для модели (iPhone 15 Pro)
  *   /price 15 Pro off — убрать лимит модели
+ *   /price s24 ultra 500 · /price ipad air 5 300 — другие категории (ключи — src/catalog.js, /models)
  *   /price off        — убрать все ограничения
  */
 export function applyPriceCommand(text, current) {
@@ -70,8 +61,8 @@ export function applyPriceCommand(text, current) {
 
   m = args.match(/^(.+?)\s+(\d+|off)$/i);
   if (m) {
-    const model = normalizeModel(m[1]);
-    if (!model || !/iPhone (1[3-9]|2\d|Air|Fold)/.test(model)) return { error: `Не понял модель «${m[1]}». Пример: /price 15 Pro 550` };
+    const model = identifyQuery(m[1])?.model;
+    if (!model) return { error: `Не понял модель «${m[1]}». Пример: /price 15 Pro 550 · список моделей: /models` };
     if (/off/i.test(m[2])) {
       delete f.models[model];
       return { filter: f, message: `Лимит для ${model} снят.` };
@@ -88,6 +79,8 @@ export function applyPriceCommand(text, current) {
  *   /sell 15 Pro 256 32000     — iPhone 15 Pro 256 GB продаю за 32 000 ₴
  *   /sell 13 Pro 15500         — для любого объёма памяти
  *   /sell 15 Pro 256 off       — удалить
+ *   /sell macbook air 13 m2 16/512 40000 — MacBook: диагональ, чип, RAM/SSD (RAM входит в ключ модели)
+ *   /sell watch 9 45mm lte 12000 · /sell ipad air 5 256 lte 20000 · /sell s24 ultra 256 25000
  *   /sell off                  — очистить таблицу
  */
 export function applySellCommand(text, current) {
@@ -98,17 +91,12 @@ export function applySellCommand(text, current) {
 
   const m = args.match(/^(.+?)\s+(\d{3,6}|off)\s*(₴|грн|uah)?$/i);
   if (!m) return { error: 'Не понял. Пример: /sell 15 Pro 256 32000' };
-  let modelText = m[1];
-  let storage = '*';
-  const st = modelText.match(/\s(64|128|256|512|1024)\s*(gb)?$|\s(1|2)\s*tb$/i);
-  if (st) {
-    storage = st[1] ? `${st[1] === '1024' ? '1 TB' : `${st[1]} GB`}` : `${st[3]} TB`;
-    modelText = modelText.slice(0, st.index);
-  }
-  const model = normalizeModel(modelText);
-  if (!model || !/iPhone (1[3-9]|2\d|Air|Fold)/.test(model)) return { error: `Не понял модель «${modelText}». Пример: /sell 15 Pro 256 32000` };
+  const q = identifyQuery(m[1]);
+  if (!q) return { error: `Не понял модель «${m[1]}». Пример: /sell 15 Pro 256 32000 · список моделей: /models` };
+  const { model } = q;
+  const storage = q.variant || '*';
   const key = `${model}|${storage}`;
-  const label = `${model}${storage === '*' ? ' (любая память)' : ` ${storage}`}`;
+  const label = `${model}${storage === '*' ? ' (любой вариант)' : ` ${storage}`}`;
   if (/off/i.test(m[2])) {
     delete table[key];
     return { table, message: `${label}: удалено.` };

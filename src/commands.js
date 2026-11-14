@@ -20,6 +20,7 @@ export const COMMANDS = [
   { command: 'sell', description: 'Мои цены продажи в Украине (для маржи)' },
   { command: 'margin', description: 'Порог маржи для 🔥 и звука' },
   { command: 'price', description: 'Фильтр цены' },
+  { command: 'models', description: 'Какие модели распознаю и как их называть' },
   { command: 'stats', description: 'Статистика за сегодня' },
   { command: 'help', description: 'Что умеет бот' },
 ];
@@ -277,6 +278,28 @@ export async function statsText(env, day) {
   return [`📱 Прислано объявлений: <b>${total}</b>`, block(HIGH, '⭐ Высокий приоритет'), block(MEDIUM, '▫️ Средний приоритет')].join('\n\n');
 }
 
+function commandModels(env) {
+  return sendText(
+    env,
+    '📚 <b>Каталог моделей</b>\nНазвание модели — ключ для медианы рынка, /sell и /price. Заголовок объявления должен назвать модель однозначно; не распознано — не присылаю.\n\n' +
+      '<b>iPhone 11+</b> — <code>iPhone 15 Pro Max</code> + память\n' +
+      '<b>iPad</b> — <code>iPad 10</code>, <code>iPad mini 7</code>, <code>iPad Air 5</code>, <code>iPad Air 11" M2</code>, <code>iPad Pro 13" M4</code> + память (<code>256 GB</code> / <code>256 GB LTE</code>)\n' +
+      '<b>MacBook</b> (только M1 и новее) — <code>MacBook Air 13" M2 8GB</code>, <code>MacBook Pro 14" M3 Pro 18GB</code> + SSD; без RAM в объявлении — не распознаётся\n' +
+      '<b>Apple Watch</b> (Series 7+, Ultra) — <code>Apple Watch Series 9 45mm</code>, <code>Apple Watch Ultra 2 49mm</code> + <code>GPS</code> / <code>LTE</code>\n' +
+      '<b>Samsung</b> (S21+, Z Fold/Flip 3+) — <code>Galaxy S24 Ultra</code>, <code>Galaxy Z Flip6</code> + память\n' +
+      '<b>Pixel 6+</b> — <code>Pixel 8 Pro</code>, <code>Pixel 9a</code> + память\n\n' +
+      '<b>Как писать в командах</b>\n' +
+      '<code>/sell 15 Pro 256 32000</code>\n' +
+      '<code>/sell s24 ultra 256 25000</code>\n' +
+      '<code>/sell pixel 8 pro 18000</code>\n' +
+      '<code>/sell ipad air 5 256 lte 20000</code>\n' +
+      '<code>/sell watch 9 45mm lte 12000</code>\n' +
+      '<code>/sell macbook air 13 m2 16/512 40000</code> — диагональ, чип, RAM/SSD\n' +
+      '<code>/price macbook pro 14 m3 pro 18gb 1200</code>\n\n' +
+      '<i>Сейчас в лентах включены только iPhone 13+; остальные категории и iPhone 11/12 включатся вместе с региональными лентами.</i>',
+  );
+}
+
 async function commandHelp(env) {
   await sendText(
     env,
@@ -290,7 +313,7 @@ async function commandHelp(env) {
       '🔧 возможен дефект · 🧩 возможно аксессуар · 🔁 обмен\n\n' +
       '<b>В каждом объявлении</b>\n📈 маржа по вашей цене продажи (/sell) · 💰 сравнение с обычной ценой на Kleinanzeigen · 🚨 признаки обмана\n' +
       '✍️ Написать продавцу — готовое сообщение на немецком (два варианта: «ещё доступен?» и с ценой −10%)\n\n' +
-      '<b>Команды</b>\n/deals — лучшие по Германии за 24 ч\n/sell — ваши цены продажи в Украине (₴)\n/margin — порог маржи для 🔥 и звука\n/cities — города: последние объявления, выключить/включить\n/price — фильтр цены (общий и по моделям)\n/stats — статистика за сегодня\n\n' +
+      '<b>Команды</b>\n/deals — лучшие по Германии за 24 ч\n/sell — ваши цены продажи в Украине (₴)\n/margin — порог маржи для 🔥 и звука\n/cities — города: последние объявления, выключить/включить\n/price — фильтр цены (общий и по моделям)\n/models — какие модели распознаю\n/stats — статистика за сегодня\n\n' +
       'Каждый вечер в 21:00 — итоги дня.',
   );
 }
@@ -325,6 +348,7 @@ export async function handleUpdate(env, update) {
   if (['/cities', 'города'].includes(cmd)) return citiesMenu(env);
   if (['/price', 'цена'].includes(cmd)) return commandPrice(env, text);
   if (['/sell', 'продажа'].includes(cmd)) return commandSell(env, text);
+  if (['/models', 'модели'].includes(cmd)) return commandModels(env);
   if (['/margin', 'маржа'].includes(cmd)) return commandMargin(env, text);
   if (['/stats', 'стат', '/стат'].includes(cmd)) return sendText(env, `📊 <b>Сегодня</b>\n\n${await statsText(env, berlinDay())}`);
   if (text) return commandHelp(env);

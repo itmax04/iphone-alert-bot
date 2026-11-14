@@ -1,8 +1,12 @@
-// Отбор и разбор объявлений iPhone.
-// Отбор: только iPhone 13 и новее. Цена не ограничена. Дефекты и аксессуары не отсеиваем — только помечаем.
+// Отбор и разбор объявлений. Модель распознаёт каталог (src/catalog.js): не распознано — не присылаем.
+// Цена не ограничена. Дефекты и аксессуары не отсеиваем — только помечаем.
+import { identify } from './catalog.js';
 
-// «iPhone 13», «Iphone 14pro», «Apple iPhone Air», «iPhone 16e», «iPhone 18 Pro Max».
-const MODEL_RE = /i\s?phone\s*(1[3-9]|2\d)(?!\d)\s*(e|pro\s*max|pro|plus|max|mini)?|i\s?phone\s*(air|fold)/i;
+// Что включено в действующих лентах (города, MV, Германия). Каталог уже умеет iPhone 11/12, iPad, MacBook,
+// Apple Watch, Samsung и Pixel — они включаются вместе с региональными лентами (этап 3), чтобы число
+// сообщений не выросло раньше времени.
+const ACTIVE_CATEGORIES = ['iphone'];
+const MIN_IPHONE = 13;
 
 const DEFECT_WORDS = [
   'defekt',
@@ -61,17 +65,12 @@ function defectWord(text) {
   return null;
 }
 
-/** Модель из заголовка, например «iPhone 15 Pro Max», или null, если это не iPhone 13+. */
+/** Ключ модели из заголовка, например «iPhone 15 Pro Max», или null, если модель не распознана или не включена. */
 export function modelOf(title) {
-  const m = (title || '').match(MODEL_RE);
-  if (!m) return null;
-  if (m[3]) return `iPhone ${m[3][0].toUpperCase()}${m[3].slice(1).toLowerCase()}`;
-  const variant = (m[2] || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .replace(/^E$/, 'e');
-  return `iPhone ${m[1]}${variant === 'e' ? 'e' : variant ? ` ${variant}` : ''}`;
+  const r = identify(title);
+  if (!r || !ACTIVE_CATEGORIES.includes(r.category)) return null;
+  if (r.category === 'iphone' && r.gen < MIN_IPHONE) return null;
+  return r.model;
 }
 
 export function storageOf(text) {
@@ -88,7 +87,7 @@ export function batteryOf(text) {
 
 /** Причина отказа или null. */
 export function rejectReason(item) {
-  if (!modelOf(item.title)) return 'не iPhone 13+';
+  if (!modelOf(item.title)) return 'модель не распознана';
   return null;
 }
 

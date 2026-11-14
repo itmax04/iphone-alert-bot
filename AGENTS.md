@@ -42,6 +42,7 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
 
 ```bash
 for f in src/*.js scripts/*.js; do node --check "$f"; done
+node scripts/test_models.js && node scripts/test_market.js
 npm run check                      # живые страницы локально
 npm run deploy
 npm run tail                       # cron-запуски: outcome ok, без exceptions, cpuTime ≈ ≤ 10–15 мс
@@ -51,6 +52,11 @@ curl "https://iphone-alert-bot.<subdomain>.workers.dev/run?key=$(cat .run_key)&c
 ## Частые ловушки
 
 - Разметка Kleinanzeigen (Tailwind) меняется — опирайся на `data-adid`, `data-href`, JSON-LD.
-- `modelOf` возвращает канонические имена («iPhone 15 Pro Max») — ключи `/sell`, `/price`, `prices` зависят от них.
+- Ключи модели выдаёт каталог `src/catalog.js` (`identify`); `modelOf` в `filters.js` — он же, но только для включённых
+  категорий (`ACTIVE_CATEGORIES`, `MIN_IPHONE`). От ключей зависят `prices`, `market`, `/sell`, `/price`: **не переименовывай
+  существующие** («iPhone 13 Mini» — с большой «M», так накоплено). Сомнение в модели — `null`, а не догадка.
+  Меняешь каталог — добавь реальный заголовок в `scripts/test_models.js`.
+- Память для ключа берут действующие ленты через `storageOf` (filters.js), а каталог возвращает свой `variant`
+  (строже: только существующие объёмы, LTE, SSD отдельно от RAM). Новые ленты должны использовать `identify().variant`.
 - `seen` используют и города, и обход MV (`sent = 2`); `deal_seen` — только лента Германии. Не путай.
 - `stats` содержит строки `city = 'mv'` — учитывай при суммировании по городам.

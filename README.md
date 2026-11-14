@@ -65,7 +65,8 @@ src/
   index.js        расписание (cityFor, HIGH_CYCLE), runCity, формат сообщения города, HTTP-маршруты
   cities.js       23 города: приоритет, slug и код места Kleinanzeigen, время в пути, маршрут, примечание
   kleinanzeigen.js URL поиска (searchUrl, с seite:N), загрузка страницы, разбор объявления (parseArticle)
-  filters.js      модель iPhone 13+ (MODEL_RE), память, аккумулятор, пометки 🔧/🧩/🔁 (с учётом «keine Mängel»)
+  catalog.js      каталог моделей: распознавание и ключи (iPhone 11+, iPad, MacBook, Apple Watch, Samsung, Pixel)
+  filters.js      что включено в лентах (ACTIVE_CATEGORIES, MIN_IPHONE), память, аккумулятор, пометки 🔧/🧩/🔁 (с учётом «keine Mängel»)
   settings.js     фильтр цены /price и разбор /sell
   market.js       медиана рынка (prices), маржа, курс НБУ, признаки обмана
   deals.js        лучшие предложения по Германии: оценка, мгновенные 🔥, сводка «Топ-5», /deals
@@ -78,6 +79,7 @@ db/
   migrations/     то же по шагам (уже применены к рабочей базе)
 scripts/
   test_market.js  локальный тест ночного пересчёта медиан (node:sqlite)
+  test_models.js  локальный тест каталога: реальные заголовки → ключ модели, команды /sell и /price
   check.js        локальный прогон: разбор и отбор по городам (без Telegram/D1)
   seed_prices.js  разово: собрать цены с первых страниц всех городов → SQL для prices
   sweep_mv.js     разово: обойти все страницы MV → SQL для prices + JSON для анализа
@@ -88,7 +90,8 @@ wrangler.toml     имя Worker, 2 cron, привязка D1
 |---|---|
 | добавить/убрать город, поменять приоритет | `src/cities.js` (slug и `l<код>` — из URL поиска Kleinanzeigen) |
 | частота проверок | `HIGH_CYCLE`, `CRON_MEDIUM` в `src/index.js`; MV — `INTERVAL` в `src/mv.js` |
-| модели (13+) | `MODEL_RE` в `src/filters.js` |
+| какие модели распознаются, ключи | `src/catalog.js` (+ случай в `scripts/test_models.js`) |
+| какие категории включены в лентах | `ACTIVE_CATEGORIES`, `MIN_IPHONE` в `src/filters.js` |
 | пороги «выгодно» / «🔥», число сообщений | константы в начале `src/deals.js` |
 | время сводок | `DIGEST_HOURS` в `src/deals.js` |
 | признаки обмана | `SCAM_PHRASES` и `scamAndDeal` в `src/market.js` |
@@ -97,7 +100,22 @@ wrangler.toml     имя Worker, 2 cron, привязка D1
 
 ## Отбор, рынок, маржа, обман
 
-- **Модель:** только iPhone 13 и новее (включая mini/Plus/Pro/Pro Max/16e/17/18/Air). Остальное — мимо.
+- **Модель:** в лентах сейчас включены только iPhone 13 и новее (включая mini/Plus/Pro/Pro Max/16e/17/18/Air). Остальное — мимо.
+- **Каталог моделей** (`src/catalog.js`): заголовок должен однозначно дать ключ модели, иначе объявление не присылается
+  и не попадает в `prices`. Не распознаются: «Suche…», комплекты из разных устройств (iPhone + Apple Watch), несколько
+  штук одной ценой, «Hülle für iPhone 15», аксессуар без объёма памяти, «14 Max» (Pro Max или Plus?). Каталог уже
+  знает больше, чем включено в лентах (включение — `ACTIVE_CATEGORIES`, `MIN_IPHONE` в `src/filters.js`):
+
+  | Категория | Ключ модели (`model`) | Вариант (`storage`) | Не распознаётся |
+  |---|---|---|---|
+  | iPhone 11+ | `iPhone 15 Pro Max`, `iPhone 13 Mini`, `iPhone 16e`, `iPhone Air` | `256 GB` | SE, XR и старше |
+  | iPad | `iPad 10`, `iPad mini 7`, `iPad Air 5`, `iPad Air 11" M2`, `iPad Pro 13" M4` | `256 GB` / `256 GB LTE` | iPad до 9, Air до 4, mini до 6, Pro до M1; Pro/Air M2+ без диагонали или чипа |
+  | MacBook | `MacBook Air 13" M2 8GB`, `MacBook Pro 14" M3 Pro 18GB` (линейка + диагональ + чип + RAM) | SSD: `512 GB` | Intel; нет RAM, чипа или диагонали (кроме Air M1 и Air M2 2022 — это 13"); MacBook Neo |
+  | Apple Watch | `Apple Watch Series 9 45mm`, `Apple Watch Ultra 2 49mm` | `GPS` / `LTE` / `LTE Edelstahl` / `LTE Titan` (Ultra — без варианта) | SE, Series 6 и старше, Series без размера |
+  | Samsung | `Galaxy S24`, `Galaxy S24+`, `Galaxy S24 Ultra`, `Galaxy S24 FE`, `Galaxy Z Fold5`, `Galaxy Z Flip6` | `256 GB` | A-серия, S20 и старше, Note, Fold/Flip 1–2 |
+  | Pixel 6+ | `Pixel 8`, `Pixel 8 Pro`, `Pixel 9a`, `Pixel 9 Pro XL`, `Pixel 9 Pro Fold` | `256 GB` | Pixel 5 и старше |
+
+  Описание используется только для недостающих признаков (RAM, диагональ, размер часов, память); линейка — всегда из заголовка.
 - **Пометки (не отсеивают в городах):** 🔧 возможен дефект (defekt, Mängel, gesprungen, iCloud gesperrt…, но не «keine Mängel», «nicht gesperrt»), 🧩 аксессуар (слово-аксессуар в заголовке и нет объёма памяти), 🔁 обмен.
 - **Фильтр цены `/price`:** общий min/max и лимит на модель (`settings.price`). Объявления без цены не отсеиваются.
 - **Медиана рынка:** все увиденные iPhone 13+ (таблица `prices`, 30 дней, та же модель **и** память, ≥ 5 объявлений).
@@ -140,7 +158,8 @@ iPhone 13+, которых **ещё не видел мониторинг гор�
 |---|---|
 | `/deals` | лучшие по Германии за 24 ч |
 | `/cities` | кнопки городов и MV → карточка: последние объявления, проверки, 🔕/🔔, ссылки поиска и DB |
-| `/sell 15 Pro 256 32000` | цена продажи в ₴; `/sell` — таблица и курс; `… off` — удалить |
+| `/sell 15 Pro 256 32000` | цена продажи в ₴; `/sell` — таблица и курс; `… off` — удалить; другие категории: `/sell s24 ultra 256 25000`, `/sell ipad air 5 256 lte 20000`, `/sell watch 9 45mm lte 12000`, `/sell macbook air 13 m2 16/512 40000` (диагональ, чип, RAM/SSD) |
+| `/models` | какие модели распознаются и как их писать в командах |
 | `/margin 100` | порог маржи для 🔥 |
 | `/price 600`, `/price 100-600`, `/price min 80`, `/price 15 Pro 550`, `/price off` | фильтр цены |
 | `/stats` | статистика за сегодня по городам |
@@ -186,6 +205,8 @@ npx --yes wrangler@4 d1 execute iphone-alert-bot --remote --command "SELECT city
 
 ```bash
 npm run check               # все города локально (разбор + отбор), без Telegram и D1
+node scripts/test_models.js # каталог моделей: реальные заголовки → ключи, команды /sell и /price
+node scripts/test_market.js # ночной пересчёт медиан
 node scripts/check.js berlin
 npm run deploy
 npm run tail                # логи и cpuTime каждого запуска
