@@ -18,7 +18,7 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
    - `RegExp` — собирать один раз на уровне модуля.
 2. **Один запуск — одна страница.** Нужно больше страниц — распредели по нескольким запускам (как `mv.js`).
 3. **Cron на аккаунт — 5, заняты все.** Новые задачи встраивай в `cityFor`/`HIGH_CYCLE` или в слоты `CRON_MEDIUM`.
-4. **D1:** следи за числом прочитанных строк — медиану считай с кэшем на запуск (`medianCache` в `deals.js`).
+4. **D1 (5 млн прочитанных строк в сутки):** `marketMedian` читает одну строку таблицы `market` (пересчёт раз в ночь, `recomputeMarket`); не добавляй запросы по `prices` в дневной путь. Новый `DELETE`/`SELECT` по времени — только с индексом. Проверка: `npx wrangler@4 d1 info iphone-alert-bot` → `rows_read_24h` (цель < 1 млн).
 5. После `deploy` новые cron начинают срабатывать через ~5–10 минут.
 
 ## Правила владельца (не менять без явной просьбы)
@@ -33,7 +33,7 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
 
 1. Город: запись в `src/cities.js` (`slug` и `loc` берутся из URL поиска Kleinanzeigen вида
    `/s-handy-telekom/<slug>/…/k0c173<loc>`). Первый запуск нового города — молчаливый.
-2. Изменения схемы: новый файл `db/migrations/00N_*.sql` **и** то же в `db/schema.sql`; применить
+2. Изменения схемы (последняя — `004_market.sql`): новый файл `db/migrations/00N_*.sql` **и** то же в `db/schema.sql`; применить
    `npx wrangler d1 execute iphone-alert-bot --remote --file db/migrations/00N_*.sql`.
 3. Команды Telegram: `COMMANDS` в `src/commands.js` → после публикации `GET /setup?key=…`.
 4. Настройки владельца (`/price`, `/sell`, `/margin`) живут в `settings` (D1) — не зашивай их в код.

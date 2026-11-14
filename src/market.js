@@ -79,9 +79,49 @@ export function recordPrice(env, item, model, storage, now) {
   );
 }
 
-/** @returns {{ median: number, count: number }|null} */
-export async function marketMedian(env, model, storage) {
-  if (!model) return null;
+// Честная медиана и нижний квартиль по каждой паре модель+память и по модели целиком.
+// Окно: n — число цен ключа, rn — место цены по возрастанию; медиана — среднее двух средних (для нечётного n — одна).
+const RECOMPUTE_SELECT = (storageExpr, partition) => `
+  SELECT model, ${storageExpr} AS storage,
+         AVG(CASE WHEN rn IN ((n + 1) / 2, (n + 2) / 2) THEN price END) AS median,
+         MAX(CASE WHEN rn = (n + 3) / 4 THEN price END) AS p25,
+         MAX(n) AS count
+  FROM (
+    SELECT model, storage, price,
+           ROW_NUMBER() OVER (PARTITION BY ${partition} ORDER BY price) AS rn,
+           COUNT(*) OVER (PARTITION BY ${partition}) AS n
+    FROM prices WHERE seen_at > ?1 ${partition === 'model' ? '' : 'AND storage IS NOT NULL'}
+  )
+  GROUP BY ${partition}
+  HAVING MAX(n) >= ?2`;
+
+/** Операторы пересчёта таблицы market (выполнять одним batch: старое удаляется, новое пишется атомарно). */
+export function recomputeStatements(db, now = Date.now()) {
+  const since = now - MARKET_DAYS * 24 * 3600 * 1000;
+  return [
+    db.prepare('DELETE FROM market'),
+    db
+      .prepare(`INSERT INTO market (model, storage, median, p25, count, updated_at)
+        SELECT model, storage, median, p25, count, ?3 FROM (${RECOMPUTE_SELECT('storage', 'model, storage')})`)
+      .bind(since, MIN_SAMPLES, now),
+    db
+      .prepare(`INSERT INTO market (model, storage, median, p25, count, updated_at)
+        SELECT model, storage, median, p25, count, ?3 FROM (${RECOMPUTE_SELECT("'*'", 'model')})`)
+      .bind(since, MIN_SAMPLES, now),
+    db.prepare("INSERT INTO market (model, storage, median, p25, count, updated_at) VALUES ('_meta', '*', 0, 0, 0, ?)").bind(now),
+  ];
+}
+
+export async function recomputeMarket(env) {
+  await env.DB.batch(recomputeStatements(env.DB));
+}
+
+let marketReady = false; // true — ночной пересчёт уже был, читаем только таблицу market
+const marketCache = new Map(); // на время жизни запуска
+const CACHE_TTL = 10 * 60 * 1000;
+
+/** Старый способ (до первого пересчёта): 400 самых дешёвых цен — медиана занижена; только пока market пуста. */
+async function legacyMedian(env, model, storage) {
   const since = Date.now() - MARKET_DAYS * 24 * 3600 * 1000;
   const sql = storage
     ? 'SELECT price FROM prices WHERE model = ? AND storage = ? AND seen_at > ? ORDER BY price LIMIT 400'
@@ -92,6 +132,29 @@ export async function marketMedian(env, model, storage) {
   const mid = Math.floor(prices.length / 2);
   const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
   return { median: Math.round(median), count: prices.length };
+}
+
+/** @returns {{ median: number, p25: number|null, count: number }|null} */
+export async function marketMedian(env, model, storage) {
+  if (!model) return null;
+  const key = `${model}|${storage || '*'}`;
+  const hit = marketCache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.value;
+  let value;
+  if (!marketReady) {
+    marketReady = Boolean(await env.DB.prepare("SELECT 1 AS ok FROM market WHERE model = '_meta'").first());
+  }
+  if (marketReady) {
+    const row = await env.DB.prepare('SELECT median, p25, count FROM market WHERE model = ? AND storage = ?')
+      .bind(model, storage || '*')
+      .first();
+    value = row ? { median: Math.round(row.median), p25: Math.round(row.p25), count: row.count } : null;
+  } else {
+    value = await legacyMedian(env, model, storage); // до первого ночного пересчёта не кэшируем надолго
+    return value;
+  }
+  marketCache.set(key, { at: Date.now(), value });
+  return value;
 }
 
 // --- Признаки мошенничества ---

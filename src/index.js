@@ -12,7 +12,7 @@ import { CITIES } from './cities.js';
 import { fetchCity, parseArticle } from './kleinanzeigen.js';
 import { rejectReason, modelOf, storageOf, batteryOf, tagsOf } from './filters.js';
 import { getPriceFilter, priceRejectReason, describeSellTable } from './settings.js';
-import { eurRate, getSellTable, getMarginThreshold, marginOf, recordPrice, marketMedian, scamAndDeal } from './market.js';
+import { eurRate, getSellTable, getMarginThreshold, marginOf, recordPrice, marketMedian, recomputeMarket, scamAndDeal } from './market.js';
 import { handleUpdate, statsText, itemKeyboard, COMMANDS } from './commands.js';
 import { runGermany, sendDigest, DIGEST_HOURS } from './deals.js';
 import { runMvStep, mvDue } from './mv.js';
@@ -23,6 +23,7 @@ const MEDIUM = CITIES.filter((c) => c.priority === 'medium');
 const MAX_MESSAGES_PER_RUN = 5;
 const SEEN_TTL_DAYS = 30;
 const DAILY_REPORT_HOUR = 21;
+const NIGHT_HOUR = 3; // пересчёт медиан и чистка (Europe/Berlin)
 const DAY = 24 * 3600 * 1000;
 
 export const CRON_HIGH = '* * * * *';
@@ -248,8 +249,9 @@ export default {
     if (hour === DAILY_REPORT_HOUR && minute === 0) await dailyReport(env).catch((e) => console.error('report failed', e));
     const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Berlin', weekday: 'short' }).format(date);
     if (weekday === 'Mon' && hour === 10 && minute === 0) await sellReminder(env).catch((e) => console.error('reminder failed', e));
-    // Раз в час чистим старые записи.
-    if (minute === 30) {
+    // Раз в сутки ночью (Берлин): пересчёт медиан рынка, затем чистка старых записей.
+    if (hour === NIGHT_HOUR && minute === 20) await recomputeMarket(env).catch((e) => console.error('market failed', e));
+    if (hour === NIGHT_HOUR && minute === 30) {
       const cutoff = Date.now() - SEEN_TTL_DAYS * DAY;
       await env.DB.batch([
         env.DB.prepare('DELETE FROM seen WHERE first_seen < ?').bind(cutoff),
@@ -297,6 +299,7 @@ export default {
       }
       if (slug === 'germany') return Response.json(await runGermany(env));
       if (slug === 'mv') return Response.json(await runMvStep(env));
+      if (slug === 'market') return Response.json(await recomputeMarket(env).then(() => ({ market: 'recomputed' })));
       if (slug === 'digest') return Response.json(await sendDigest(env));
       const city = CITIES.find((c) => c.slug === slug);
       if (!city) return Response.json({ error: 'unknown city', cities: CITIES.map((c) => c.slug) }, { status: 400 });
