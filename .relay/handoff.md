@@ -1,8 +1,9 @@
 # Handoff — iphone-alert-bot: экономия D1 и переделка поиска
 
 ## Идентичность
-- Репозиторий: `itmax04/iphone-alert-bot`, локально `~/Developer/iphone-alert-bot`, ветка `main`, HEAD `c824a3a`.
-- **Этап 3 написан, но НЕ закоммичен, НЕ задеплоен, миграция 005 НЕ применена** (14.11.2026). Незакоммичено:
+- Репозиторий: `itmax04/iphone-alert-bot`, локально `~/Developer/iphone-alert-bot`, ветка `main`, HEAD `0d7571e` (этап 3, запушен 14.11.2026).
+- **Выкладка этапа 3 (14.11.2026): commit+push — готово; миграция 005 — применена (таблица `feeds` есть, 0 строк); deploy — НЕ выполнен**: D1 ответила кодом 7500 (дневной лимит чтения строк превышен до 00:00 UTC), владелец решил ждать сброса.
+  Колонка `items.class` не проверена (запрос к items отклонён). Файлы этапа 3 (уже в коммите):
   новые `src/feeds.js`, `scripts/test_feeds.js`, `db/migrations/005_feeds.sql`; изменены `src/index.js`, `commands.js`,
   `filters.js`, `kleinanzeigen.js`, `settings.js`, `messages.js`, `db/schema.sql`, `scripts/check.js`, `scripts/test_models.js`,
   `README.md`, `AGENTS.md`, `wrangler.toml`, `package.json`; удалены (git rm) `src/cities.js`, `src/mv.js`, `src/deals.js`,
@@ -86,6 +87,7 @@
 - Удалить старые таблицы отдельной миграцией 006 — после включения отправки.
 
 ## Следующий шаг
+0. **После 00:00 UTC (≈ 01:00 по Берлину 15.11):** проверить `SELECT class FROM items LIMIT 1` (если колонки нет — `ALTER TABLE items ADD COLUMN class TEXT`), затем `npm run deploy` → `npm run tail` в фоне (outcome ok, cpuTime ≤ 10–15 мс) → `SELECT feed, initialized, page, last_ok, last_error FROM feeds` через ~18 мин (12 строк, `initialized = 1`) → владелец вызывает `GET /setup?key=<RUN_KEY>` и проверяет `/feeds`, `/mode`, `/stats`. Откат: `wrangler rollback` (9afeb298).
 1. С разрешения владельца: commit + push этапа 3 → миграция `005_feeds.sql` на удалённой D1 → `npm run deploy` → `npm run tail`
    (outcome ok, cpuTime ≈ ≤ 10–15 мс) → владелец вызывает `GET /setup?key=<RUN_KEY>`.
 2. Через 1–2 дня: `/stats` и отчёты 21:00 — сколько «прислал бы» и разбивка по классам; `SELECT class, COUNT(*) FROM items GROUP BY class`;
