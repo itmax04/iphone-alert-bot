@@ -1,15 +1,20 @@
-// Kleinanzeigen: новые объявления iPhone в городе (только частные продавцы, только предложения).
+// Kleinanzeigen: страница ленты (регион + категория, только частные продавцы, только предложения) и разбор объявления.
 
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
 export class SourceError extends Error {}
 
-export function searchUrl(city) {
-  const page = city.page > 1 ? `seite:${city.page}/` : '';
+/**
+ * Адрес ленты: регион + категория, частные продавцы, только предложения, цена от MIN_PRICE €, сначала новые.
+ * Без поискового слова — «c<категория><место>», со словом — «<слово>/k0c<категория><место>».
+ */
+export const MIN_PRICE = 150;
+export function feedUrl(feed, page = 1) {
+  const { group, region } = feed;
   return (
-    `https://www.kleinanzeigen.de/s-handy-telekom${city.slug ? `/${city.slug}` : ''}` +
-    `/anbieter:privat/anzeige:angebote/${page}sortierung:neuste/iphone/k0c173${city.loc}`
+    `https://www.kleinanzeigen.de/${group.path}/${region.slug}/anbieter:privat/anzeige:angebote/preis:${MIN_PRICE}:/` +
+    `${page > 1 ? `seite:${page}/` : ''}sortierung:neuste/${group.query ? `${group.query}/k0` : ''}c${group.cat}${region.loc}`
   );
 }
 
@@ -27,7 +32,7 @@ function textMatching(fragment, re) {
   return m ? m[1].replace(/&nbsp;|\s+/g, ' ').trim() : '';
 }
 
-/** Режет страницу на блоки <article data-adid=...>: только номер и сырой HTML, без разбора. */
+/** Режет страницу на блоки <article data-adid=...>: только номер (id — строка «ka:N», num — число) и сырой HTML, без разбора. */
 function splitArticles(html) {
   const articles = [];
   let pos = html.indexOf('data-adid="');
@@ -36,19 +41,20 @@ function splitArticles(html) {
     const end = html.indexOf('</article>', pos);
     if (begin === -1 || end === -1) break;
     const idStart = pos + 'data-adid="'.length;
-    articles.push({ id: `ka:${html.slice(idStart, html.indexOf('"', idStart))}`, raw: html.slice(begin, end) });
+    const num = html.slice(idStart, html.indexOf('"', idStart));
+    articles.push({ id: `ka:${num}`, num: Number(num), raw: html.slice(begin, end) });
     pos = html.indexOf('data-adid="', end);
   }
   return articles;
 }
 
 /**
- * Страница поиска города: список { id, raw } без разбора. Разбирать дорого, поэтому
+ * Страница ленты: список { id, num, raw } без разбора. Разбирать дорого, поэтому
  * разбираем потом только новые объявления — parseArticle().
  */
-export async function fetchCity(city) {
+export async function fetchFeed(feed, page = 1) {
   const request = () =>
-    fetch(searchUrl(city), { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'de-DE,de;q=0.9' } });
+    fetch(feedUrl(feed, page), { headers: { 'User-Agent': BROWSER_UA, 'Accept-Language': 'de-DE,de;q=0.9' } });
   let r = await request();
   // Kleinanzeigen иногда разово отвечает 403/429 — одна повторная попытка через 5 секунд.
   if (r.status === 403 || r.status === 429) {
@@ -64,7 +70,7 @@ export async function fetchCity(city) {
   if (articles.length === 0 && !html.includes('srchrslt')) {
     throw new SourceError('страница без списка результатов (возможно, блокировка)');
   }
-  return articles;
+  return articles.filter((a) => Number.isFinite(a.num));
 }
 
 /** Полный разбор одного объявления. */

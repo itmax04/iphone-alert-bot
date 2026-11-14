@@ -2,8 +2,8 @@ name = "iphone-alert-bot"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
-# Каждую минуту — 8 городов ⭐ и лента «вся Германия»; каждые 2 минуты — 15 городов ▫️ и раз в 3 ч обход MV
-# (см. cityFor/HIGH_CYCLE в src/index.js). Время — UTC. Все 5 бесплатных cron аккаунта заняты.
+# Каждую минуту — 3 ленты телефонов по кругу; каждые 2 минуты — 9 остальных лент (планшеты, MacBook, Apple Watch)
+# (см. feedFor в src/feeds.js). Время — UTC. Все 5 бесплатных cron аккаунта заняты.
 [triggers]
 crons = ["* * * * *", "*/2 * * * *"]
 

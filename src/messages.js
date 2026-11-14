@@ -15,11 +15,16 @@ export function offerPrice(price) {
 /** @returns {{ de: string, deOffer: string|null, ru: string, ruOffer: string|null, offer: number|null }} */
 export function sellerMessages(item, cityName, { remote = false } = {}) {
   const phone = phoneName(item);
+  // Блокировка активации: у Apple — iCloud, у Samsung и Pixel — учётная запись Google/Samsung.
+  const apple = !item.model || /^(iPhone|iPad|MacBook|Apple Watch)/.test(item.model);
   const questions = [
-    'Ist das Gerät frei von iCloud-/Aktivierungssperre?',
+    apple ? 'Ist das Gerät frei von iCloud-/Aktivierungssperre?' : 'Ist das Gerät frei von Konto-Sperre (Google-/Samsung-Konto entfernt)?',
     item.battery ? null : 'Wie ist der Akkuzustand (in %)?',
   ].filter(Boolean);
-  const questionsRu = ['Телефон отвязан от iCloud (нет блокировки активации)?', item.battery ? null : 'Какое состояние аккумулятора (в %)?'].filter(Boolean);
+  const questionsRu = [
+    apple ? 'Устройство отвязано от iCloud (нет блокировки активации)?' : 'Устройство отвязано от учётной записи Google/Samsung?',
+    item.battery ? null : 'Какое состояние аккумулятора (в %)?',
+  ].filter(Boolean);
 
   const base = (extraDe) =>
     [

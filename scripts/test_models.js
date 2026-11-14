@@ -203,18 +203,19 @@ for (const [title, model, variant, description] of CASES) {
 }
 console.log(`${passed === CASES.length ? 'PASS' : 'FAIL'}  распознавание: ${passed}/${CASES.length} заголовков`);
 
-// Действующие ленты: только iPhone 13+ (остальное включается на этапе 3).
+// Ленты: все категории каталога, iPhone — с 11-го.
 const ACTIVE = [
   ['iPhone 15 Pro Max 256GB', 'iPhone 15 Pro Max'],
   ['iPhone 13 Mini', 'iPhone 13 Mini'],
-  ['iPhone 12 Pro 128GB', null],
-  ['iPhone 11 128 GB rot GUT', null],
-  ['Samsung Galaxy S25 Ultra 256 GB', null],
-  ['iPad Pro 11 M4 256Gb Schwarz', null],
+  ['iPhone 12 Pro 128GB', 'iPhone 12 Pro'],
+  ['iPhone 11 128 GB rot GUT', 'iPhone 11'],
+  ['Samsung Galaxy S25 Ultra 256 GB', 'Galaxy S25 Ultra'],
+  ['iPad Pro 11 M4 256Gb Schwarz', 'iPad Pro 11" M4'],
+  ['iPhone XR 64GB', null],
 ];
 let okActive = 0;
 for (const [title, expected] of ACTIVE) if (check(`modelOf «${title}»`, modelOf(title), expected)) okActive++;
-console.log(`${okActive === ACTIVE.length ? 'PASS' : 'FAIL'}  действующие ленты (только iPhone 13+): ${okActive}/${ACTIVE.length}`);
+console.log(`${okActive === ACTIVE.length ? 'PASS' : 'FAIL'}  ленты (все категории, iPhone 11+): ${okActive}/${ACTIVE.length}`);
 
 // Команды: ключ таблицы /sell и лимиты /price.
 const SELL = [

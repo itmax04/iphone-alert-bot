@@ -1,22 +1,18 @@
-// Команды и кнопки Telegram: /cities (просмотр и выключение городов), /price, /stats, сообщения продавцам.
+// Команды и кнопки Telegram: /feeds (ленты: просмотр и выключение), /mode, /price, /sell, /stats, сообщения продавцам.
 
-import { CITIES } from './cities.js';
-import { searchUrl } from './kleinanzeigen.js';
-import { getPriceFilter, savePriceFilter, applyPriceCommand, describePriceFilter, applySellCommand, describeSellTable } from './settings.js';
+import { feedUrl } from './kleinanzeigen.js';
+import { getPriceFilter, savePriceFilter, applyPriceCommand, describePriceFilter, applySellCommand, describeSellTable, getMode, saveMode } from './settings.js';
 import { getSellTable, saveSellTable, eurRate, getMarginThreshold, saveMarginThreshold } from './market.js';
 import { sellerMessages } from './messages.js';
-import { dealsOverview } from './deals.js';
-import { MV, getMvState, toggleMvMute } from './mv.js';
+import { FEEDS, GROUPS, getFeedState, frequencyOf, berlinDay } from './feeds.js';
 import { call, sendText, escapeHtml } from './telegram.js';
 
-const HIGH = CITIES.filter((c) => c.priority === 'high');
-const MEDIUM = CITIES.filter((c) => c.priority === 'medium');
 const HOUR = 3600 * 1000;
-const CITY_ITEMS_LIMIT = 8;
+const FEED_ITEMS_LIMIT = 8;
 
 export const COMMANDS = [
-  { command: 'deals', description: 'Лучшие предложения по Германии за 24 ч' },
-  { command: 'cities', description: 'Города: последние объявления, вкл/выкл' },
+  { command: 'feeds', description: 'Ленты: последние объявления, вкл/выкл' },
+  { command: 'mode', description: 'Режим: наблюдение или отправка' },
   { command: 'sell', description: 'Мои цены продажи в Украине (для маржи)' },
   { command: 'margin', description: 'Порог маржи для 🔥 и звука' },
   { command: 'price', description: 'Фильтр цены' },
@@ -25,127 +21,51 @@ export const COMMANDS = [
   { command: 'help', description: 'Что умеет бот' },
 ];
 
-export function bahnUrl(city) {
-  return `https://www.bahn.de/buchung/fahrplan/suche#sts=true&so=Rostock%20Hbf&zo=${encodeURIComponent(city.name)}`;
-}
-
-export function frequencyOf(city) {
-  if (city.priority === 'medium') return 'раз в 30 мин, без звука';
-  return 'каждые 10 мин, со звуком';
-}
-
 function berlinTime(ts) {
   return ts ? new Date(ts).toLocaleString('de-DE', { timeZone: 'Europe/Berlin', dateStyle: 'short', timeStyle: 'short' }) : '—';
 }
 
-function berlinDay(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+/** Начало сегодняшнего дня по Берлину, мс. */
+function berlinDayStart(now = Date.now()) {
+  const [h, m, sec] = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+    .format(new Date(now))
+    .split(':')
+    .map(Number);
+  return now - (((h % 24) * 60 + m) * 60 + sec) * 1000;
 }
 
-/** Кнопки под объявлением. */
-export function itemKeyboard(itemId, url, city) {
-  return {
-    inline_keyboard: [
-      [{ text: '✍️ Написать продавцу', callback_data: `lt:${itemId}` }],
-      [{ text: '🔗 Открыть', url }, { text: '🚆 Дорога', url: bahnUrl(city) }],
-    ],
-  };
-}
-
-async function citiesMenu(env) {
-  const states = Object.fromEntries((await env.DB.prepare('SELECT city, muted FROM city_state').all()).results.map((s) => [s.city, s]));
+async function feedsMenu(env) {
+  const states = Object.fromEntries((await env.DB.prepare('SELECT feed, muted FROM feeds').all()).results.map((s) => [s.feed, s]));
   const today = Object.fromEntries(
     (await env.DB.prepare('SELECT city, sent FROM stats WHERE day = ?').bind(berlinDay()).all()).results.map((r) => [r.city, r.sent]),
   );
-  const button = (c) => ({
-    text: `${states[c.slug]?.muted ? '🔕 ' : c.priority === 'high' ? '⭐ ' : ''}${c.name}${today[c.slug] ? ` (${today[c.slug]})` : ''}`,
-    callback_data: `city:${c.slug}`,
+  const button = (f) => ({
+    text: `${states[f.id]?.muted ? '🔕' : f.group.icon} ${f.region.name}${today[f.id] ? ` (${today[f.id]})` : ''}`,
+    callback_data: `feed:${f.id}`,
   });
-  const rows = (list, perRow) => {
-    const out = [];
-    for (let i = 0; i < list.length; i += perRow) out.push(list.slice(i, i + perRow).map(button));
-    return out;
-  };
-  const mv = await getMvState(env);
-  const mvButton = {
-    text: `${mv.muted ? '🔕 ' : '🗺 '}Mecklenburg-Vorpommern${today.mv ? ` (${today.mv})` : ''}`,
-    callback_data: 'mvcard',
-  };
+  const mode = await getMode(env);
   await sendText(
     env,
-    '🏙 <b>Города</b>\nНажмите на город — покажу последние iPhone оттуда и дам выключить или включить город.\n' +
-      '⭐ высокий приоритет · 🗺 вся земля MV · 🔕 выключен · (N) — прислано сегодня',
-    { reply_markup: { inline_keyboard: [...rows(HIGH, 2), ...rows(MEDIUM, 3), [mvButton]] } },
+    '🗂 <b>Ленты</b>\nНажмите на ленту — покажу последние объявления и дам выключить или включить её.\n' +
+      `${GROUPS.map((g) => `${g.icon} ${g.name}`).join(' · ')} · 🔕 выключена · (N) — ${mode === 'send' ? 'прислано' : 'прислал бы'} сегодня`,
+    { reply_markup: { inline_keyboard: GROUPS.map((g) => FEEDS.filter((f) => f.group === g).map(button)) } },
   );
 }
 
-async function mvCard(env, editMessage) {
-  const s = await getMvState(env);
-  const stats = (await env.DB.prepare("SELECT * FROM stats WHERE day = ? AND city = 'mv'").bind(berlinDay()).first()) || { sent: 0, checks: 0 };
-  const next = s.lastStart ? s.lastStart + 3 * HOUR : null;
-  const status = s.muted
-    ? '🔕 <b>выключен</b>'
-    : s.active
-      ? `🔄 идёт обход: страница ${s.page} · найдено пока ${s.collected.length}`
-      : `следующий обход ≈ ${berlinTime(next && next > Date.now() ? next : Date.now())}`;
+async function feedCard(env, id, editMessage) {
+  const feed = FEEDS.find((f) => f.id === id);
+  if (!feed) return;
+  const [state, mode] = await Promise.all([getFeedState(env, feed), getMode(env)]);
+  const stats = (await env.DB.prepare('SELECT * FROM stats WHERE day = ? AND city = ?').bind(berlinDay(), id).first()) || { sent: 0, checks: 0 };
+  const items = (await env.DB.prepare('SELECT * FROM items WHERE city = ? ORDER BY sent_at DESC LIMIT ?').bind(id, FEED_ITEMS_LIMIT).all()).results;
+
   const lines = [
-    '🗺 <b>Mecklenburg-Vorpommern — вся земля</b>',
-    'Раз в 3 часа бот проходит все объявления iPhone 13+ по MV и присылает тихую сводку новых из мест вне ваших городов.',
+    `${feed.group.icon} <b>${escapeHtml(feed.name)}</b>${state.muted ? ' — 🔕 <b>выключена</b>' : ''}`,
+    `🔄 Проверка: ${frequencyOf(feed)} · последняя ${berlinTime(state.last_ok)}${state.last_error ? ` · ⚠️ ${escapeHtml(state.last_error)}` : ''}`,
+    `📬 Сегодня ${mode === 'send' ? 'прислано' : 'прислал бы'}: ${stats.sent}, проверок: ${stats.checks}`,
     '',
-    `🔄 Статус: ${status}`,
-    `🕐 Последний обход начат: ${berlinTime(s.lastStart)}`,
-    `📱 Сегодня в сводках: ${stats.sent}, просмотрено страниц: ${stats.checks}`,
+    items.length ? `<b>Последние ${items.length}:</b>` : 'Пока в этой ленте ничего подходящего не было.',
   ];
-  const last = s.lastSummary;
-  if (last) {
-    lines.push('', `<b>Последняя сводка</b> (${berlinTime(last.at)}): ${last.count} новых, страниц ${last.pages}`);
-    for (const c of last.items || []) {
-      const head = [c.model, c.storage, c.price != null ? `${c.price} €` : null].filter(Boolean).join(' · ');
-      lines.push(`• <a href="${escapeHtml(c.url)}">${escapeHtml(head)}</a> — ${escapeHtml(c.location || '')}${c.discount >= 15 ? ` · 💰 −${c.discount}%` : ''}`);
-    }
-    if (!last.count) lines.push('Новых вне ваших городов не было.');
-  } else {
-    lines.push('', 'Первая сводка придёт после ближайшего обхода.');
-  }
-  const markup = {
-    inline_keyboard: [
-      [
-        { text: s.muted ? '🔔 Включить обход MV' : '🔕 Выключить обход MV', callback_data: 'mvmute' },
-        { text: '🔗 Поиск по MV', url: searchUrl(MV) },
-      ],
-      [{ text: '⬅️ Все города', callback_data: 'cities' }],
-    ],
-  };
-  const text = lines.join('\n');
-  if (editMessage) {
-    await call(
-      env,
-      'editMessageText',
-      { chat_id: editMessage.chat.id, message_id: editMessage.message_id, text, parse_mode: 'HTML', link_preview_options: { is_disabled: true }, reply_markup: markup },
-      { withChat: false },
-    ).catch(() => sendText(env, text, { reply_markup: markup }));
-  } else {
-    await sendText(env, text, { reply_markup: markup });
-  }
-}
-
-async function cityCard(env, slug, editMessage) {
-  const city = CITIES.find((c) => c.slug === slug);
-  if (!city) return;
-  const state = (await env.DB.prepare('SELECT * FROM city_state WHERE city = ?').bind(slug).first()) || {};
-  const stats = (await env.DB.prepare('SELECT * FROM stats WHERE day = ? AND city = ?').bind(berlinDay(), slug).first()) || { sent: 0, checks: 0 };
-  const items = (
-    await env.DB.prepare('SELECT * FROM items WHERE city = ? ORDER BY sent_at DESC LIMIT ?').bind(slug, CITY_ITEMS_LIMIT).all()
-  ).results;
-
-  const lines = [
-    `${city.priority === 'high' ? '⭐' : '▫️'} <b>${escapeHtml(city.name)}</b>${state.muted ? ' — 🔕 <b>выключен</b>' : ''}`,
-    `🚆 ~${escapeHtml(city.minutes)} мин из Ростока · ${escapeHtml(city.route)}`,
-    `🔄 Проверка: ${frequencyOf(city)} · последняя ${berlinTime(state.last_ok)}${state.last_error ? ` · ⚠️ ${escapeHtml(state.last_error)}` : ''}`,
-    `📱 Сегодня прислано: ${stats.sent}, проверок: ${stats.checks}`,
-  ];
-  if (/SEV|Ремонт|стыковки/.test(city.note)) lines.push(`⚠️ ${escapeHtml(city.note)}`);
-  lines.push('', items.length ? `<b>Последние ${items.length}:</b>` : 'Пока бот ничего отсюда не присылал.');
   for (const i of items) {
     const head = [i.model, i.storage, i.price != null ? `${i.price} €${i.negotiable ? ' VB' : ''}` : null].filter(Boolean).join(' · ');
     lines.push(`• <a href="${escapeHtml(i.url)}">${escapeHtml(head)}</a>${i.battery ? ` · 🔋${i.battery}%` : ''} · ${berlinTime(i.sent_at)}`);
@@ -154,10 +74,10 @@ async function cityCard(env, slug, editMessage) {
   const markup = {
     inline_keyboard: [
       [
-        { text: state.muted ? '🔔 Включить город' : '🔕 Выключить город', callback_data: `mute:${slug}` },
-        { text: '🔗 Поиск', url: searchUrl(city) },
+        { text: state.muted ? '🔔 Включить ленту' : '🔕 Выключить ленту', callback_data: `fmute:${id}` },
+        { text: '🔗 Поиск', url: feedUrl(feed) },
       ],
-      [{ text: '🚆 Дорога (DB)', url: bahnUrl(city) }, { text: '⬅️ Все города', callback_data: 'cities' }],
+      [{ text: '⬅️ Все ленты', callback_data: 'feeds' }],
     ],
   };
   const text = lines.join('\n');
@@ -173,15 +93,20 @@ async function cityCard(env, slug, editMessage) {
   }
 }
 
-async function toggleMute(env, slug) {
-  await env.DB.prepare(
-    `INSERT INTO city_state (city, muted) VALUES (?, 1)
-     ON CONFLICT(city) DO UPDATE SET muted = 1 - muted`,
-  )
-    .bind(slug)
-    .run();
-  const row = await env.DB.prepare('SELECT muted FROM city_state WHERE city = ?').bind(slug).first();
-  return Boolean(row?.muted);
+function toggleMute(env, id) {
+  return env.DB.prepare('INSERT INTO feeds (feed, muted) VALUES (?, 1) ON CONFLICT(feed) DO UPDATE SET muted = 1 - muted').bind(id).run();
+}
+
+const MODE_TEXT = {
+  watch: '👀 <b>Режим: наблюдение</b>\nОбъявления не присылаю — только считаю, сколько прислал бы. Итоги — в /stats и в отчёте в 21:00.',
+  send: '📬 <b>Режим: отправка</b>\nПрисылаю каждое распознанное объявление, прошедшее фильтр /price. Звук — только у 🔥 (маржа от порога /margin).',
+};
+
+async function commandMode(env, text) {
+  const arg = text.replace(/^\S+/, '').trim().toLowerCase();
+  if (arg === 'send' || arg === 'watch') await saveMode(env, arg);
+  const mode = await getMode(env);
+  await sendText(env, `${arg === mode ? '✅ ' : ''}${MODE_TEXT[mode]}\n\nПереключить: <code>/mode ${mode === 'send' ? 'watch' : 'send'}</code>`);
 }
 
 async function sendSellerMessage(env, itemId) {
@@ -190,14 +115,11 @@ async function sendSellerMessage(env, itemId) {
     await sendText(env, 'Это объявление уже удалено из памяти бота (старше 30 дней).');
     return;
   }
-  const city = CITIES.find((c) => c.slug === item.city);
-  // Из ленты по Германии — обычно далеко: предлагаем отправку через «Sicher bezahlen».
-  const remote = item.city === 'de';
-  const place = city?.name || (item.location || '').replace(/^\d{5}\s*/, '') || 'Rostock';
-  const msg = sellerMessages(item, place, { remote });
+  const place = (item.location || '').replace(/^\d{5}\s*/, '') || 'Rostock';
+  const msg = sellerMessages(item, place);
   const head = [item.model, item.storage, item.price != null ? `${item.price} €${item.negotiable ? ' VB' : ''}` : null].filter(Boolean).join(' · ');
   const parts = [
-    `✍️ <b>Сообщение продавцу: ${escapeHtml(head)} — ${escapeHtml(city?.name || item.location || '')}</b>`,
+    `✍️ <b>Сообщение продавцу: ${escapeHtml(head)} — ${escapeHtml(item.location || '')}</b>`,
     'Нажмите на текст — он скопируется, затем «🔗 Открыть» → «Nachricht schreiben» → вставить.',
     '',
     '<b>1. Ещё доступен?</b>',
@@ -255,27 +177,48 @@ async function commandMargin(env, text) {
   await sendText(
     env,
     `🔥 <b>Порог маржи: ${min} €</b>\nОбъявления с маржой от этой суммы помечаются 🔥 и приходят со звуком; остальные по моделям из /sell — без звука.\n` +
-      'Модели без цены продажи — как раньше, по приоритету города.\n\nИзменить: <code>/margin 100</code>',
+      'Модели без цены продажи приходят без звука.\n\nИзменить: <code>/margin 100</code>',
   );
 }
 
+const CLASS_LINES = [
+  ['deal', '✅ цена ≤ медиана / 1,2 (уже выгодно)'],
+  ['low', '🤝 не выше медианы'],
+  ['high', '▫️ выше медианы'],
+  ['nomed', '❔ медианы пока нет'],
+  ['flag', '🔧 дефект, аксессуар или признак обмана'],
+];
+
 export async function statsText(env, day) {
-  const rows = (await env.DB.prepare('SELECT * FROM stats WHERE day = ?').bind(day).all()).results;
-  const byCity = Object.fromEntries(rows.map((r) => [r.city, r]));
-  const states = Object.fromEntries((await env.DB.prepare('SELECT * FROM city_state').all()).results.map((s) => [s.city, s]));
-  const block = (list, title) => {
-    const lines = [`<b>${title}</b>`];
-    for (const c of list) {
-      const r = byCity[c.slug] || { checks: 0, errors: 0, sent: 0 };
-      const st = states[c.slug] || {};
-      const ok = st.last_ok && Date.now() - st.last_ok < HOUR;
-      const icon = st.muted ? '🔕' : ok ? '✅' : '❌';
-      lines.push(`${icon} ${escapeHtml(c.name)}: прислано ${r.sent}, проверок ${r.checks}${r.errors ? `, ошибок ${r.errors}` : ''}`);
+  const today = day === berlinDay();
+  const [mode, statRows, stateRows, classRows] = await Promise.all([
+    getMode(env),
+    env.DB.prepare('SELECT * FROM stats WHERE day = ?').bind(day).all(),
+    env.DB.prepare('SELECT feed, last_ok, muted FROM feeds').all(),
+    // Разбивка по классам — только за сегодня (items хранит время, а не день).
+    today ? env.DB.prepare('SELECT class, COUNT(*) AS n FROM items WHERE sent_at >= ? GROUP BY class').bind(berlinDayStart()).all() : { results: [] },
+  ]);
+  const byFeed = Object.fromEntries(statRows.results.map((r) => [r.city, r]));
+  const states = Object.fromEntries(stateRows.results.map((s) => [s.feed, s]));
+  const word = mode === 'send' ? 'прислано' : 'прислал бы';
+  const total = FEEDS.reduce((sum, f) => sum + (byFeed[f.id]?.sent || 0), 0);
+  const out = [`${mode === 'send' ? '📬 Прислано объявлений' : '👀 Наблюдение: прислал бы объявлений'}: <b>${total}</b>`];
+
+  const classes = Object.fromEntries(classRows.results.map((r) => [r.class, r.n]));
+  const classLines = CLASS_LINES.filter(([key]) => classes[key]).map(([key, label]) => `${label}: ${classes[key]}`);
+  if (classLines.length) out.push(classLines.join('\n'));
+
+  for (const g of GROUPS) {
+    const lines = [`<b>${g.icon} ${g.name}</b>`];
+    for (const f of FEEDS.filter((x) => x.group === g)) {
+      const r = byFeed[f.id] || { checks: 0, errors: 0, sent: 0 };
+      const st = states[f.id] || {};
+      const icon = st.muted ? '🔕' : st.last_ok && Date.now() - st.last_ok < HOUR ? '✅' : '❌';
+      lines.push(`${icon} ${escapeHtml(f.region.name)}: ${word} ${r.sent}, проверок ${r.checks}${r.errors ? `, ошибок ${r.errors}` : ''}`);
     }
-    return lines.join('\n');
-  };
-  const total = rows.reduce((s, r) => s + r.sent, 0);
-  return [`📱 Прислано объявлений: <b>${total}</b>`, block(HIGH, '⭐ Высокий приоритет'), block(MEDIUM, '▫️ Средний приоритет')].join('\n\n');
+    out.push(lines.join('\n'));
+  }
+  return out.join('\n\n');
 }
 
 function commandModels(env) {
@@ -295,25 +238,23 @@ function commandModels(env) {
       '<code>/sell ipad air 5 256 lte 20000</code>\n' +
       '<code>/sell watch 9 45mm lte 12000</code>\n' +
       '<code>/sell macbook air 13 m2 16/512 40000</code> — диагональ, чип, RAM/SSD\n' +
-      '<code>/price macbook pro 14 m3 pro 18gb 1200</code>\n\n' +
-      '<i>Сейчас в лентах включены только iPhone 13+; остальные категории и iPhone 11/12 включатся вместе с региональными лентами.</i>',
+      '<code>/price macbook pro 14 m3 pro 18gb 1200</code>',
   );
 }
 
 async function commandHelp(env) {
   await sendText(
     env,
-    '📱 <b>iPhone Alert Bot</b>\nСлежу за новыми объявлениями iPhone 13 и новее на Kleinanzeigen: только частные продавцы, только продажа. ' +
-      'Города и приоритеты — из вашей таблицы.\n\n' +
-      '⭐ высокий приоритет — каждые 10 минут, со звуком\n▫️ средний — раз в 30 минут, без звука\n' +
-      '🗺 вся Mecklenburg-Vorpommern — раз в 3 часа, сводка новых вне ваших городов\n\n' +
-      '<b>Лучшие предложения по всей Германии</b> (отдельно от городов)\n' +
-      '🔥 исключительные (на 40%+ дешевле рынка) — сразу, не больше 6 в день, 8–23 ч\n' +
-      '📋 «Топ-5 выгодных» (на 25%+ дешевле или маржа от порога) — в 9, 13, 17 и 21 ч\n\n' +
+    '📱 <b>Alert Bot</b>\nСлежу за новыми объявлениями на Kleinanzeigen: только частные продавцы, только продажа, от 150 €.\n' +
+      'Регионы: Berlin, Hamburg, вся Mecklenburg-Vorpommern.\n\n' +
+      '📱 телефоны (iPhone 11+, Samsung, Pixel) — раз в 3 минуты\n📲 iPad · 💻 MacBook · ⌚ Apple Watch — раз в 18 минут\n\n' +
+      'Присылаю только объявления, где модель распознана однозначно (/models).\n' +
       '🔧 возможен дефект · 🧩 возможно аксессуар · 🔁 обмен\n\n' +
       '<b>В каждом объявлении</b>\n📈 маржа по вашей цене продажи (/sell) · 💰 сравнение с обычной ценой на Kleinanzeigen · 🚨 признаки обмана\n' +
       '✍️ Написать продавцу — готовое сообщение на немецком (два варианта: «ещё доступен?» и с ценой −10%)\n\n' +
-      '<b>Команды</b>\n/deals — лучшие по Германии за 24 ч\n/sell — ваши цены продажи в Украине (₴)\n/margin — порог маржи для 🔥 и звука\n/cities — города: последние объявления, выключить/включить\n/price — фильтр цены (общий и по моделям)\n/models — какие модели распознаю\n/stats — статистика за сегодня\n\n' +
+      '<b>Команды</b>\n/feeds — ленты: последние объявления, выключить/включить\n/mode — наблюдение (только считать) или отправка\n' +
+      '/sell — ваши цены продажи в Украине (₴)\n/margin — порог маржи для 🔥 и звука\n/price — фильтр цены (общий и по моделям)\n' +
+      '/models — какие модели распознаю\n/stats — статистика за сегодня\n\n' +
       'Каждый вечер в 21:00 — итоги дня.',
   );
 }
@@ -327,16 +268,11 @@ export async function handleUpdate(env, update) {
     await call(env, 'answerCallbackQuery', { callback_query_id: q.id }, { withChat: false }).catch(() => {});
     const [kind, ...rest] = (q.data || '').split(':');
     const arg = rest.join(':');
-    if (kind === 'cities') return citiesMenu(env);
-    if (kind === 'mvcard') return mvCard(env, q.message);
-    if (kind === 'mvmute') {
-      await toggleMvMute(env);
-      return mvCard(env, q.message);
-    }
-    if (kind === 'city') return cityCard(env, arg, q.message);
-    if (kind === 'mute') {
-      await toggleMute(env, arg);
-      return cityCard(env, arg, q.message);
+    if (kind === 'feeds') return feedsMenu(env);
+    if (kind === 'feed') return feedCard(env, arg, q.message);
+    if (kind === 'fmute') {
+      if (FEEDS.some((x) => x.id === arg)) await toggleMute(env, arg);
+      return feedCard(env, arg, q.message);
     }
     if (kind === 'lt') return sendSellerMessage(env, arg);
     return;
@@ -344,8 +280,8 @@ export async function handleUpdate(env, update) {
 
   const text = (update.message?.text || '').trim();
   const cmd = text.toLowerCase().split(/[\s@]/)[0];
-  if (['/deals', 'выгодные', 'лучшие'].includes(cmd)) return sendText(env, await dealsOverview(env));
-  if (['/cities', 'города'].includes(cmd)) return citiesMenu(env);
+  if (['/feeds', '/cities', 'ленты'].includes(cmd)) return feedsMenu(env);
+  if (['/mode', 'режим'].includes(cmd)) return commandMode(env, text);
   if (['/price', 'цена'].includes(cmd)) return commandPrice(env, text);
   if (['/sell', 'продажа'].includes(cmd)) return commandSell(env, text);
   if (['/models', 'модели'].includes(cmd)) return commandModels(env);

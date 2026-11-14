@@ -1,12 +1,10 @@
 // Отбор и разбор объявлений. Модель распознаёт каталог (src/catalog.js): не распознано — не присылаем.
-// Цена не ограничена. Дефекты и аксессуары не отсеиваем — только помечаем.
+// Дефекты и аксессуары не отсеиваем — только помечаем.
 import { identify } from './catalog.js';
 
-// Что включено в действующих лентах (города, MV, Германия). Каталог уже умеет iPhone 11/12, iPad, MacBook,
-// Apple Watch, Samsung и Pixel — они включаются вместе с региональными лентами (этап 3), чтобы число
-// сообщений не выросло раньше времени.
-const ACTIVE_CATEGORIES = ['iphone'];
-const MIN_IPHONE = 13;
+// Что включено в лентах (src/feeds.js). iPhone — с 11-го.
+const ACTIVE_CATEGORIES = ['iphone', 'ipad', 'macbook', 'watch', 'samsung', 'pixel'];
+const MIN_IPHONE = 11;
 
 const DEFECT_WORDS = [
   'defekt',
@@ -65,18 +63,20 @@ function defectWord(text) {
   return null;
 }
 
-/** Ключ модели из заголовка, например «iPhone 15 Pro Max», или null, если модель не распознана или не включена. */
-export function modelOf(title) {
-  const r = identify(title);
+/**
+ * Распознанное объявление { category, model, variant } или null, если модель не распознана или не включена.
+ * variant — вариант для ключа рынка из каталога (память, «256 GB LTE», SSD, GPS/LTE) или null.
+ */
+export function recognize(title, description = '') {
+  const r = identify(title, description);
   if (!r || !ACTIVE_CATEGORIES.includes(r.category)) return null;
   if (r.category === 'iphone' && r.gen < MIN_IPHONE) return null;
-  return r.model;
+  return r;
 }
 
-export function storageOf(text) {
-  const m = (text || '').match(/(\d{2,4})\s?gb|(1|2)\s?tb/i);
-  if (!m) return null;
-  return m[1] ? `${m[1]} GB` : `${m[2]} TB`;
+/** Ключ модели из заголовка, например «iPhone 15 Pro Max», или null. */
+export function modelOf(title) {
+  return recognize(title)?.model ?? null;
 }
 
 export function batteryOf(text) {
@@ -85,22 +85,15 @@ export function batteryOf(text) {
   return value && value <= 100 ? value : null;
 }
 
-/** Причина отказа или null. */
-export function rejectReason(item) {
-  if (!modelOf(item.title)) return 'модель не распознана';
-  return null;
-}
-
-/** Пометки: возможный дефект, аксессуар, обмен. Не влияют на отбор. */
-export function tagsOf(item) {
+/** Пометки: возможный дефект, аксессуар, обмен. rec — результат recognize(). */
+export function tagsOf(item, rec) {
   const text = `${item.title} ${item.description}`;
   const tags = [];
   const defect = defectWord(text);
   if (defect) tags.push(`🔧 возможно дефект («${defect}»)`);
-  // Аксессуар — если в заголовке есть такое слово, но нет объёма памяти (у телефонов его обычно пишут).
+  // Аксессуар — если в заголовке есть такое слово, а варианта (памяти) каталог не нашёл. У часов памяти не пишут.
   const accessory = containsAny(item.title, ACCESSORY_WORDS);
-  if (accessory && !storageOf(item.title)) tags.push(`🧩 возможно аксессуар («${accessory}»)`);
+  if (accessory && !rec?.variant && rec?.category !== 'watch') tags.push(`🧩 возможно аксессуар («${accessory}»)`);
   if (/tausch/i.test(item.title)) tags.push('🔁 продавец рассматривает обмен');
-  if (item.price != null && item.price < 50) tags.push('⚠️ подозрительно низкая цена');
   return tags;
 }

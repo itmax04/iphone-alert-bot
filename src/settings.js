@@ -20,6 +20,18 @@ export function savePriceFilter(env, filter) {
     .run();
 }
 
+/** Режим лент: 'watch' — наблюдение (считаем, но не присылаем), 'send' — присылаем. По умолчанию — наблюдение. */
+export async function getMode(env) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'mode'").first();
+  return row && JSON.parse(row.value) === 'send' ? 'send' : 'watch';
+}
+
+export function saveMode(env, mode) {
+  return env.DB.prepare("INSERT INTO settings (key, value) VALUES ('mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .bind(JSON.stringify(mode))
+    .run();
+}
+
 /** Причина отказа по цене или null. */
 export function priceRejectReason(item, model, filter) {
   if (item.price == null) return null;

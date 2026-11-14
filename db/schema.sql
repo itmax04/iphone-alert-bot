@@ -1,4 +1,20 @@
--- Хранилище iPhone-бота (Cloudflare D1).
+-- Хранилище бота (Cloudflare D1).
+-- Региональные ленты: состояние каждой ленты (порог и последние номера объявлений).
+CREATE TABLE IF NOT EXISTS feeds (
+  feed TEXT PRIMARY KEY,                -- ph-be, tab-hh, mac-mv, aw-be … (src/feeds.js)
+  floor INTEGER NOT NULL DEFAULT 0,     -- номера объявлений не выше порога — старые
+  recent TEXT NOT NULL DEFAULT '[]',    -- JSON: последние ~40 номеров выше порога
+  page INTEGER NOT NULL DEFAULT 1,      -- > 1 — идёт дочитывание следующих страниц
+  pending INTEGER NOT NULL DEFAULT 0,   -- 1 — страница переполнена и обработана не вся: после неё нужна следующая
+  initialized INTEGER NOT NULL DEFAULT 0,
+  last_ok INTEGER,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  alerted INTEGER NOT NULL DEFAULT 0,
+  muted INTEGER NOT NULL DEFAULT 0
+);
+
+-- Таблицы seen, city_state, deal_seen, deals, mv_seen остались от мониторинга городов и больше не пополняются.
 CREATE TABLE IF NOT EXISTS seen (
   id TEXT PRIMARY KEY,          -- ka:<id объявления>
   city TEXT NOT NULL,
@@ -19,7 +35,7 @@ CREATE TABLE IF NOT EXISTS city_state (
 
 CREATE TABLE IF NOT EXISTS stats (
   day TEXT NOT NULL,            -- YYYY-MM-DD по Берлину
-  city TEXT NOT NULL,
+  city TEXT NOT NULL,           -- id ленты (исторически — город)
   checks INTEGER NOT NULL DEFAULT 0,
   errors INTEGER NOT NULL DEFAULT 0,
   sent INTEGER NOT NULL DEFAULT 0,
@@ -27,7 +43,7 @@ CREATE TABLE IF NOT EXISTS stats (
 );
 CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY,
-  city TEXT NOT NULL,
+  city TEXT NOT NULL,            -- id ленты
   model TEXT,
   storage TEXT,
   battery INTEGER,
@@ -37,8 +53,9 @@ CREATE TABLE IF NOT EXISTS items (
   location TEXT,
   url TEXT,
   sent_at INTEGER NOT NULL,
-  msg_id INTEGER,
-  status TEXT NOT NULL DEFAULT 'new'
+  msg_id INTEGER,                -- NULL — не присылалось (режим наблюдения)
+  status TEXT NOT NULL DEFAULT 'new',
+  class TEXT                     -- deal | low | high | nomed | flag (src/feeds.js, classOf)
 );
 CREATE INDEX IF NOT EXISTS items_city_sent ON items(city, sent_at);
 
