@@ -37,7 +37,7 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
 1. Регион или группа: запись в `REGIONS` / `GROUPS` в `src/feeds.js` (`slug` и `loc` — из URL поиска Kleinanzeigen;
    без поискового слова адрес кончается на `c<категория><место>`, со словом — `<слово>/k0c<категория><место>`).
    Формат проверь обычным запросом (`node scripts/check.js <id>`). Первый запуск новой ленты — молчаливый.
-2. Изменения схемы (последняя — `005_feeds.sql`): новый файл `db/migrations/00N_*.sql` **и** то же в `db/schema.sql`; применить
+2. Изменения схемы (последняя — `006_drop_old_tables.sql`): новый файл `db/migrations/00N_*.sql` **и** то же в `db/schema.sql`; применить
    `npx wrangler d1 execute iphone-alert-bot --remote --file db/migrations/00N_*.sql` (с разрешения владельца).
 3. Команды Telegram: `COMMANDS` в `src/commands.js` → после публикации `GET /setup?key=…`.
 4. Настройки владельца (`/mode`, `/price`, `/sell`, `/target`, `/haggle`, `/minprofit`) живут в `settings` (D1) — не зашивай их в код.
@@ -68,4 +68,3 @@ curl "https://iphone-alert-bot.<subdomain>.workers.dev/run?key=$(cat .run_key)&f
 - Номер запоминается только после обработки объявления (в `done`). Пропущенные из-за лимита или сбоя Telegram должны
   остаться «новыми» — иначе они потеряются.
 - В `stats` и `items` колонка `city` — это id ленты (`ph-be`); старые строки с названиями городов остались за прошлые дни.
-- Таблицы `seen`, `city_state`, `deal_seen`, `deals`, `mv_seen` не используются; ночная чистка их только дочищает.

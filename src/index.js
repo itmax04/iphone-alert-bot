@@ -61,14 +61,9 @@ export default {
     if (hour === NIGHT_HOUR && minute === 20) await recomputeMarket(env).catch((e) => console.error('market failed', e));
     if (hour === NIGHT_HOUR && minute === 30) {
       const cutoff = Date.now() - KEEP_DAYS * DAY;
-      // seen, deal_seen, mv_seen, deals больше не пополняются (остались от мониторинга городов) — дочищаем до удаления таблиц.
       await env.DB.batch([
-        env.DB.prepare('DELETE FROM seen WHERE first_seen < ?').bind(cutoff),
         env.DB.prepare('DELETE FROM items WHERE sent_at < ?').bind(cutoff),
         env.DB.prepare('DELETE FROM prices WHERE seen_at < ?').bind(cutoff),
-        env.DB.prepare('DELETE FROM deal_seen WHERE ts < ?').bind(Date.now() - 3 * DAY),
-        env.DB.prepare('DELETE FROM mv_seen WHERE ts < ?').bind(cutoff),
-        env.DB.prepare('DELETE FROM deals WHERE found_at < ?').bind(Date.now() - 7 * DAY),
       ]);
     }
   },

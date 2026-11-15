@@ -14,25 +14,6 @@ CREATE TABLE IF NOT EXISTS feeds (
   muted INTEGER NOT NULL DEFAULT 0
 );
 
--- Таблицы seen, city_state, deal_seen, deals, mv_seen остались от мониторинга городов и больше не пополняются.
-CREATE TABLE IF NOT EXISTS seen (
-  id TEXT PRIMARY KEY,          -- ka:<id объявления>
-  city TEXT NOT NULL,
-  first_seen INTEGER NOT NULL,  -- мс
-  sent INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS seen_first_seen ON seen(first_seen);
-
-CREATE TABLE IF NOT EXISTS city_state (
-  city TEXT PRIMARY KEY,
-  initialized INTEGER NOT NULL DEFAULT 0,
-  last_ok INTEGER,
-  fail_count INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT,
-  alerted INTEGER NOT NULL DEFAULT 0,
-  muted INTEGER NOT NULL DEFAULT 0
-);
-
 CREATE TABLE IF NOT EXISTS stats (
   day TEXT NOT NULL,            -- YYYY-MM-DD по Берлину
   city TEXT NOT NULL,           -- id ленты (исторически — город)
@@ -65,8 +46,7 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
--- Выключенные города.
--- Цены всех увиденных iPhone 13+ (для медианы рынка и защиты от мошенников).
+-- Цены всех распознанных объявлений (для медианы рынка и защиты от мошенников).
 CREATE TABLE IF NOT EXISTS prices (
   id TEXT PRIMARY KEY,
   model TEXT NOT NULL,
@@ -75,40 +55,6 @@ CREATE TABLE IF NOT EXISTS prices (
   seen_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS prices_model ON prices(model, storage, seen_at);
--- Лучшие предложения по Германии.
-CREATE TABLE IF NOT EXISTS deal_seen (
-  id TEXT PRIMARY KEY,
-  ts INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS deal_seen_ts ON deal_seen(ts);
-
-CREATE TABLE IF NOT EXISTS deals (
-  id TEXT PRIMARY KEY,
-  model TEXT,
-  storage TEXT,
-  price REAL,
-  median REAL,
-  samples INTEGER,
-  discount INTEGER,       -- % дешевле медианы
-  margin INTEGER,         -- € (если задана цена продажи)
-  score REAL NOT NULL,
-  kind TEXT NOT NULL,     -- exceptional | good
-  title TEXT,
-  location TEXT,
-  url TEXT,
-  image TEXT,
-  note TEXT,              -- «nur Versand» и т.п.
-  found_at INTEGER NOT NULL,
-  sent_at INTEGER         -- когда отправлено (мгновенно или в сводке)
-);
-CREATE INDEX IF NOT EXISTS deals_pending ON deals(sent_at, found_at);
-
--- Обход всей земли MV раз в 3 часа: что уже обработано.
-CREATE TABLE IF NOT EXISTS mv_seen (
-  id TEXT PRIMARY KEY,
-  ts INTEGER NOT NULL
-);
-
 -- Медианы рынка: пересчёт раз в ночь из prices (storage = '*' — модель с любой памятью; model = '_meta' — отметка пересчёта).
 CREATE TABLE IF NOT EXISTS market (
   model TEXT NOT NULL,
@@ -122,6 +68,4 @@ CREATE TABLE IF NOT EXISTS market (
 
 -- Индексы под ежесуточную чистку.
 CREATE INDEX IF NOT EXISTS prices_seen_at ON prices(seen_at);
-CREATE INDEX IF NOT EXISTS mv_seen_ts ON mv_seen(ts);
 CREATE INDEX IF NOT EXISTS items_sent_at ON items(sent_at);
-CREATE INDEX IF NOT EXISTS deals_found_at ON deals(found_at);
