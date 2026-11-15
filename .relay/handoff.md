@@ -117,7 +117,7 @@
 - Удалены таблицы мониторинга городов: `seen` (16 575 строк), `city_state` (23), `deal_seen` (7 126), `deals` (194), `mv_seen` (3 289).
   Порядок: сначала deploy без их ночной чистки (`src/index.js`, версия b523c546), затем `006_drop_old_tables.sql` на удалённой D1.
   Остались: `feeds`, `items`, `market`, `prices`, `settings`, `stats`. `prices`/`market`, `stats`/`items` не трогали.
-- Владелец сменил `RUN_KEY` и вызвал `/setup` → `{"webhook":true,"commands":true}`. Проверка команд в Telegram — за владельцем.
+- Владелец сменил `RUN_KEY` и вызвал `/setup` → `{"webhook":true,"commands":true}`. Владелец проверил команды в Telegram (`/target`, `/haggle`, `/minprofit`, `/stats`, `/feeds`) — работают. Режим всё ещё `watch`.
 - Tail после deploy b523c546 — PASS: 6 запусков, outcome ok 6/6, exceptions 0, cpuTime 5, 6, 6, 7, 13, 15 мс.
 
 ## Следующий шаг (актуальный)
