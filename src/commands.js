@@ -1,8 +1,9 @@
 // Команды и кнопки Telegram: /feeds (ленты: просмотр и выключение), /mode, /price, /sell, /stats, сообщения продавцам.
 
 import { feedUrl } from './kleinanzeigen.js';
-import { getPriceFilter, savePriceFilter, applyPriceCommand, describePriceFilter, applySellCommand, describeSellTable, getMode, saveMode } from './settings.js';
-import { getSellTable, saveSellTable, eurRate, getMarginThreshold, saveMarginThreshold } from './market.js';
+import { getPriceFilter, savePriceFilter, applyPriceCommand, describePriceFilter, applySellCommand, describeSellTable, getMode, saveMode, getSelect, saveSelect } from './settings.js';
+import { getSellTable, saveSellTable, eurRate } from './market.js';
+import { parseSelectArg } from './select.js';
 import { sellerMessages } from './messages.js';
 import { FEEDS, GROUPS, getFeedState, frequencyOf, berlinDay } from './feeds.js';
 import { call, sendText, escapeHtml } from './telegram.js';
@@ -13,8 +14,10 @@ const FEED_ITEMS_LIMIT = 8;
 export const COMMANDS = [
   { command: 'feeds', description: 'Ленты: последние объявления, вкл/выкл' },
   { command: 'mode', description: 'Режим: наблюдение или отправка' },
-  { command: 'sell', description: 'Мои цены продажи в Украине (для маржи)' },
-  { command: 'margin', description: 'Порог маржи для 🔥 и звука' },
+  { command: 'target', description: 'Цель: маржа к медиане рынка, %' },
+  { command: 'haggle', description: 'Максимальный запас торга, %' },
+  { command: 'minprofit', description: 'Минимальная маржа в € (off — выключить)' },
+  { command: 'sell', description: 'Мои цены продажи в Украине (справка в объявлении)' },
   { command: 'price', description: 'Фильтр цены' },
   { command: 'models', description: 'Какие модели распознаю и как их называть' },
   { command: 'stats', description: 'Статистика за сегодня' },
@@ -57,7 +60,9 @@ async function feedCard(env, id, editMessage) {
   if (!feed) return;
   const [state, mode] = await Promise.all([getFeedState(env, feed), getMode(env)]);
   const stats = (await env.DB.prepare('SELECT * FROM stats WHERE day = ? AND city = ?').bind(berlinDay(), id).first()) || { sent: 0, checks: 0 };
-  const items = (await env.DB.prepare('SELECT * FROM items WHERE city = ? ORDER BY sent_at DESC LIMIT ?').bind(id, FEED_ITEMS_LIMIT).all()).results;
+  const items = (
+    await env.DB.prepare("SELECT * FROM items WHERE city = ? AND class IN ('deal', 'haggle') ORDER BY sent_at DESC LIMIT ?").bind(id, FEED_ITEMS_LIMIT).all()
+  ).results;
 
   const lines = [
     `${feed.group.icon} <b>${escapeHtml(feed.name)}</b>${state.muted ? ' — 🔕 <b>выключена</b>' : ''}`,
@@ -68,7 +73,7 @@ async function feedCard(env, id, editMessage) {
   ];
   for (const i of items) {
     const head = [i.model, i.storage, i.price != null ? `${i.price} €${i.negotiable ? ' VB' : ''}` : null].filter(Boolean).join(' · ');
-    lines.push(`• <a href="${escapeHtml(i.url)}">${escapeHtml(head)}</a>${i.battery ? ` · 🔋${i.battery}%` : ''} · ${berlinTime(i.sent_at)}`);
+    lines.push(`${i.class === 'deal' ? '✅' : '🤝'} <a href="${escapeHtml(i.url)}">${escapeHtml(head)}</a>${i.battery ? ` · 🔋${i.battery}%` : ''} · ${berlinTime(i.sent_at)}`);
   }
 
   const markup = {
@@ -99,7 +104,7 @@ function toggleMute(env, id) {
 
 const MODE_TEXT = {
   watch: '👀 <b>Режим: наблюдение</b>\nОбъявления не присылаю — только считаю, сколько прислал бы. Итоги — в /stats и в отчёте в 21:00.',
-  send: '📬 <b>Режим: отправка</b>\nПрисылаю каждое распознанное объявление, прошедшее фильтр /price. Звук — только у 🔥 (маржа от порога /margin).',
+  send: '📬 <b>Режим: отправка</b>\nПрисылаю только ✅ «уже выгодно» и 🤝 «выгодно после торга» (/target, /haggle), прошедшие фильтр /price. Днём со звуком, с 22:00 до 08:00 — без звука.',
 };
 
 async function commandMode(env, text) {
@@ -167,23 +172,32 @@ async function commandSell(env, text) {
   );
 }
 
-async function commandMargin(env, text) {
-  const arg = text.replace(/^\/margin(@\w+)?/i, '').replace(/^маржа/i, '').trim();
-  if (/^\d+$/.test(arg)) {
-    await saveMarginThreshold(env, parseInt(arg, 10));
-    return sendText(env, `✅ 🔥 и звук — при марже от <b>${parseInt(arg, 10)} €</b>.`);
-  }
-  const min = await getMarginThreshold(env);
-  await sendText(
-    env,
-    `🔥 <b>Порог маржи: ${min} €</b>\nОбъявления с маржой от этой суммы помечаются 🔥 и приходят со звуком; остальные по моделям из /sell — без звука.\n` +
-      'Модели без цены продажи приходят без звука.\n\nИзменить: <code>/margin 100</code>',
+function describeSelect(sel) {
+  return (
+    '🎯 <b>Отбор</b>\n' +
+    `Цель: маржа от <b>${sel.target}%</b> к цене покупки (медиана рынка − цена; других расходов не считаю).\n` +
+    `Запас торга: не больше <b>${sel.haggle}%</b> (VB 10%, срочность +5%, цена снижена или висит давно +5%, Festpreis 0%).\n` +
+    `Минимальная маржа: <b>${sel.minprofit == null ? 'выключена' : `${sel.minprofit} €`}</b>.\n\n` +
+    '✅ уже выгодно — цель достигается по цене объявления\n🤝 выгодно после торга — подскажу, сколько предложить\n\n' +
+    'Изменить: <code>/target 20</code> · <code>/haggle 15</code> · <code>/minprofit 50</code> · <code>/minprofit off</code>'
   );
 }
 
+/** /target N, /haggle N, /minprofit N|off — настройки отбора (settings.select). */
+async function commandSelect(env, name, text) {
+  const sel = await getSelect(env);
+  const result = parseSelectArg(name, text);
+  if (result.error) return sendText(env, `⚠️ ${escapeHtml(result.error)}\n\n${describeSelect(sel)}`);
+  if (result.show) return sendText(env, describeSelect(sel));
+  const next = { ...sel, [name]: result.value };
+  await saveSelect(env, next);
+  await sendText(env, `✅ Сохранено. Действует на новые объявления.\n\n${describeSelect(next)}`);
+}
+
 const CLASS_LINES = [
-  ['deal', '✅ цена ≤ медиана / 1,2 (уже выгодно)'],
-  ['low', '🤝 не выше медианы'],
+  ['deal', '✅ уже выгодно'],
+  ['haggle', '🤝 выгодно после торга'],
+  ['low', '▫️ не выше медианы, но цели нет'],
   ['high', '▫️ выше медианы'],
   ['nomed', '❔ медианы пока нет'],
   ['flag', '🔧 дефект, аксессуар или признак обмана'],
@@ -248,12 +262,15 @@ async function commandHelp(env) {
     '📱 <b>Alert Bot</b>\nСлежу за новыми объявлениями на Kleinanzeigen: только частные продавцы, только продажа, от 150 €.\n' +
       'Регионы: Berlin, Hamburg, вся Mecklenburg-Vorpommern.\n\n' +
       '📱 телефоны (iPhone 11+, Samsung, Pixel) — раз в 3 минуты\n📲 iPad · 💻 MacBook · ⌚ Apple Watch — раз в 18 минут\n\n' +
-      'Присылаю только объявления, где модель распознана однозначно (/models).\n' +
-      '🔧 возможен дефект · 🧩 возможно аксессуар · 🔁 обмен\n\n' +
-      '<b>В каждом объявлении</b>\n📈 маржа по вашей цене продажи (/sell) · 💰 сравнение с обычной ценой на Kleinanzeigen · 🚨 признаки обмана\n' +
+      'Присылаю только выгодные объявления, где модель распознана однозначно (/models):\n' +
+      '✅ уже выгодно — маржа к медиане рынка не меньше цели (/target, по умолчанию 20%)\n' +
+      '🤝 выгодно после торга — подсказываю, сколько предложить (/haggle)\n' +
+      'Дефекты, аксессуары, признаки обмана и модели без медианы рынка не присылаю. Днём со звуком, с 22:00 до 08:00 — без звука.\n\n' +
+      '<b>В каждом объявлении</b>\n💰 сравнение с обычной ценой на Kleinanzeigen · 📈 справка по вашей цене продажи (/sell) · 🔁 обмен\n' +
       '✍️ Написать продавцу — готовое сообщение на немецком (два варианта: «ещё доступен?» и с ценой −10%)\n\n' +
       '<b>Команды</b>\n/feeds — ленты: последние объявления, выключить/включить\n/mode — наблюдение (только считать) или отправка\n' +
-      '/sell — ваши цены продажи в Украине (₴)\n/margin — порог маржи для 🔥 и звука\n/price — фильтр цены (общий и по моделям)\n' +
+      '/target — цель маржи, %\n/haggle — максимальный запас торга, %\n/minprofit — минимальная маржа в €\n' +
+      '/sell — ваши цены продажи в Украине (₴)\n/price — фильтр цены (общий и по моделям)\n' +
       '/models — какие модели распознаю\n/stats — статистика за сегодня\n\n' +
       'Каждый вечер в 21:00 — итоги дня.',
   );
@@ -285,7 +302,7 @@ export async function handleUpdate(env, update) {
   if (['/price', 'цена'].includes(cmd)) return commandPrice(env, text);
   if (['/sell', 'продажа'].includes(cmd)) return commandSell(env, text);
   if (['/models', 'модели'].includes(cmd)) return commandModels(env);
-  if (['/margin', 'маржа'].includes(cmd)) return commandMargin(env, text);
+  if (['/target', '/haggle', '/minprofit'].includes(cmd)) return commandSelect(env, cmd.slice(1), text);
   if (['/stats', 'стат', '/стат'].includes(cmd)) return sendText(env, `📊 <b>Сегодня</b>\n\n${await statsText(env, berlinDay())}`);
   if (text) return commandHelp(env);
 }

@@ -8,8 +8,9 @@
 
 import { fetchFeed, parseArticle } from './kleinanzeigen.js';
 import { recognize, batteryOf, tagsOf } from './filters.js';
-import { getPriceFilter, priceRejectReason, getMode } from './settings.js';
-import { eurRate, getSellTable, getMarginThreshold, marginOf, recordPrice, marketMedian, scamAndDeal } from './market.js';
+import { getPriceFilter, priceRejectReason, getMode, getSelect } from './settings.js';
+import { eurRate, getSellTable, marginOf, recordPrice, marketMedian, scamAndDeal } from './market.js';
+import { evaluate, SEND_CLASSES } from './select.js';
 import { sendText, sendItem, escapeHtml } from './telegram.js';
 
 export const REGIONS = [
@@ -128,18 +129,13 @@ function statsUpsert(env, feed, { errors = 0, sent = 0 }) {
 
 // --- Оценка и сообщение ---
 
-const TARGET_RATIO = 1.2; // «уже выгодно»: медиана ≥ цена × 1,2
+// Класс объявления (items.class) и расчёт маржи — src/select.js (evaluate). Присылаются только deal и haggle.
 
-/**
- * Класс объявления для отчёта режима наблюдения (items.class):
- *   flag — дефект, аксессуар или признак обмана; nomed — нет цены или медианы;
- *   deal — цена ≤ медиана / 1,2; low — не выше медианы; high — выше медианы.
- */
-export function classOf(item, market, tags, warnings) {
-  if (warnings.length || tags.some((t) => t.startsWith('🔧') || t.startsWith('🧩'))) return 'flag';
-  if (!market || item.price == null) return 'nomed';
-  if (item.price * TARGET_RATIO <= market.median) return 'deal';
-  return item.price <= market.median ? 'low' : 'high';
+// Ночью (22:00–08:00 по Берлину) объявления приходят без звука.
+const HOUR_FORMAT = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', hour12: false });
+export function isNight(now = Date.now()) {
+  const hour = Number(HOUR_FORMAT.format(new Date(now))) % 24;
+  return hour >= 22 || hour < 8;
 }
 
 function placeOf(item, feed) {
@@ -166,13 +162,20 @@ function formatItem(item, feed, rec, battery, insight) {
     .join(' · ');
   const lines = [];
   if (insight.warnings.length) lines.push('🚨 <b>ОСТОРОЖНО: возможен обман</b>');
-  if (insight.hot) lines.push(`🔥 <b>Выгодно: маржа ≈ ${insight.margin.marginEur} €</b>`);
+  const ev = insight.ev;
+  if (ev.cls === 'deal') lines.push(`✅ <b>Уже выгодно: маржа +${ev.marginPct}% (+${ev.marginEur} €)</b>`);
+  if (ev.cls === 'haggle') {
+    lines.push(
+      `🤝 <b>Выгодно после торга: предложите ${ev.offer} €</b>`,
+      `при ${ev.offer} € маржа +${ev.marginPct}% (+${ev.marginEur} €) · запас торга ~${ev.percent}% (${escapeHtml(ev.reasons.join(', '))})`,
+    );
+  }
   lines.push(`${feed.group.icon} <b>${escapeHtml(head)}</b>`, escapeHtml(item.title), `📍 ${escapeHtml(item.location || feed.region.name)} · ${escapeHtml(feed.name)}`);
   if (battery) lines.push(`🔋 Akku ${battery}%`);
   if (insight.margin) {
     const m = insight.margin;
     lines.push(
-      `${m.marginEur >= 0 ? '📈' : '📉'} Маржа ≈ ${m.marginEur} € (продажа ${m.sellUah.toLocaleString('ru-RU')} ₴ ≈ ${m.sellEur} € − покупка ${item.price} €)`,
+      `${m.marginEur >= 0 ? '📈' : '📉'} По /sell: ≈ ${m.marginEur} € (продажа ${m.sellUah.toLocaleString('ru-RU')} ₴ ≈ ${m.sellEur} € − покупка ${item.price} €)`,
     );
   }
   if (insight.market) {
@@ -230,9 +233,10 @@ export async function runFeed(env, feed) {
   let matched = 0;
   if (unseen.length) {
     const byNum = new Map(articles.map((a) => [a.num, a]));
-    const [mode, priceFilter] = await Promise.all([getMode(env), getPriceFilter(env)]);
+    const [mode, priceFilter, sel] = await Promise.all([getMode(env), getPriceFilter(env), getSelect(env)]);
     const send = mode === 'send';
-    const [sellTable, rate, marginMin] = send ? await Promise.all([getSellTable(env), eurRate(env), getMarginThreshold(env)]) : [{}, null, null];
+    const [sellTable, rate] = send ? await Promise.all([getSellTable(env), eurRate(env)]) : [{}, null];
+    const silent = isNight(now);
 
     // Полностью разбираем только новые объявления — это экономит большую часть процессорного времени.
     for (const num of unseen.slice(0, send ? MAX_SEND_PER_RUN : MAX_WATCH_PER_RUN)) {
@@ -253,13 +257,14 @@ export async function runFeed(env, feed) {
       const market = await marketMedian(env, rec.model, rec.variant);
       const { warnings, dealPercent } = scamAndDeal(item, market);
       const tags = tagsOf(item, rec);
+      const ev = evaluate(item, market, tags, warnings, sel, now);
+      const wanted = SEND_CLASSES.includes(ev.cls); // ✅ уже выгодно или 🤝 выгодно после торга
       let msgId = null;
-      if (send) {
+      if (send && wanted) {
         const margin = marginOf(item, rec.model, rec.variant, sellTable, rate);
-        const hot = Boolean(margin && marginMin != null && margin.marginEur >= marginMin && !warnings.length);
         try {
-          // Звук — только у 🔥 (маржа от порога /margin); остальное без звука.
-          const res = await sendItem(env, formatItem(item, feed, rec, battery, { market, margin, warnings, dealPercent, hot, tags }), item.image, itemKeyboard(item, feed), !hot);
+          // Днём со звуком, ночью без.
+          const res = await sendItem(env, formatItem(item, feed, rec, battery, { market, margin, warnings, dealPercent, ev, tags }), item.image, itemKeyboard(item, feed), silent);
           msgId = res?.result?.message_id ?? null;
           sent += 1;
         } catch (e) {
@@ -268,19 +273,19 @@ export async function runFeed(env, feed) {
         }
       }
       done.push(num);
-      matched += 1;
-      // items: присланное (msg_id) и то, что прислали бы в режиме наблюдения (msg_id NULL).
+      if (wanted) matched += 1;
+      // items: все оценённые объявления с классом; msg_id — только у присланных.
       writes.push(
         env.DB.prepare(
           `INSERT OR REPLACE INTO items (id, city, model, storage, battery, price, negotiable, title, location, url, sent_at, msg_id, class)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(item.id, feed.id, rec.model, rec.variant, battery, item.price, item.negotiable ? 1 : 0, item.title.slice(0, 200), item.location, item.url, now, msgId, classOf(item, market, tags, warnings)),
+        ).bind(item.id, feed.id, rec.model, rec.variant, battery, item.price, item.negotiable ? 1 : 0, item.title.slice(0, 200), item.location, item.url, now, msgId, ev.cls),
       );
     }
   }
 
   const next = nextState(state, unseen.length, done);
-  // «Прислано» в режиме наблюдения — сколько прислали бы.
+  // «Прислано» — число ✅ и 🤝; в режиме наблюдения — сколько прислали бы.
   writes.push(saveState(env, next), statsUpsert(env, feed, { sent: matched }));
   await env.DB.batch(writes);
   return { feed: feed.id, page: state.page, items: articles.length, unseen: unseen.length, matched, sent, nextPage: next.page };

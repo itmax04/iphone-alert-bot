@@ -27,6 +27,8 @@ function parseNumber(text) {
 // Текст между тегами, подходящий под шаблон. Шаблоны собраны один раз (на бесплатном тарифе 10 мс CPU).
 const LOCATION_RE = />\s*(\d{5}\s[^<]*?)\s*</;
 const PRICE_RE = />\s*([\d.,]+\s*€[^<]*?)\s*</;
+const POSTED_RE = /<span>((?:Heute|Gestern),\s*\d{1,2}:\d{2}|\d{2}\.\d{2}\.\d{4})<\/span>/; // «Heute, 11:50», «Gestern, 09:15», «12.11.2026»
+const OLD_PRICE_RE = /line-through">\s*([\d.,]+)\s*€/; // зачёркнутая прежняя цена — цена уже снижена
 function textMatching(fragment, re) {
   const m = fragment.match(re);
   return m ? m[1].replace(/&nbsp;|\s+/g, ' ').trim() : '';
@@ -91,6 +93,8 @@ export function parseArticle({ id, raw }) {
     description: ld.description || '',
     price: parseNumber(price),
     negotiable: /VB/.test(price),
+    posted: (raw.match(POSTED_RE) || [])[1] || null,
+    oldPrice: parseNumber((raw.match(OLD_PRICE_RE) || [])[1]),
     location: textMatching(raw, LOCATION_RE),
     url: `https://www.kleinanzeigen.de${href}`,
     image: ld.contentUrl || null,

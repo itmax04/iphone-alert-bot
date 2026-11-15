@@ -4,7 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { feedUrl } from '../src/kleinanzeigen.js';
-import { FEEDS, CRON_FAST, CRON_SLOW, feedFor, initState, pickNew, nextState, classOf, runFeed } from '../src/feeds.js';
+import { FEEDS, CRON_FAST, CRON_SLOW, feedFor, initState, pickNew, nextState, isNight, runFeed } from '../src/feeds.js';
 import { saveMode } from '../src/settings.js';
 
 const sqlite = new DatabaseSync(':memory:');
@@ -69,13 +69,11 @@ check('порог заморожен на время дочитывания', p2
 check('страница 2: мало новых → возврат на страницу 1', nextState(p2, 3, [19000, 18990, 18980]).page, 1);
 check('страница 5 — дальше не идём', nextState({ ...p2, page: 5 }, 25, page(15000, 25)).page, 1);
 
-// --- Классы для отчёта ---
-const m = { median: 600, count: 9 };
-check('класс: уже выгодно (≤ медиана / 1,2)', classOf({ price: 500 }, m, [], []), 'deal');
-check('класс: не выше медианы', classOf({ price: 560 }, m, [], []), 'low');
-check('класс: выше медианы', classOf({ price: 650 }, m, [], []), 'high');
-check('класс: нет медианы', classOf({ price: 500 }, null, [], []), 'nomed');
-check('класс: дефект', classOf({ price: 300 }, m, ['🔧 возможно дефект («defekt»)'], []), 'flag');
+// Классы и отбор (deal / haggle / low / high / nomed / flag) — scripts/test_select.js.
+// Медианы рынка для проверки ленты целиком: iPhone 15 Pro 256 — 650 €, iPhone 14 128 — 500 €, iPhone 16 256 — 900 €.
+for (const [model, storage, median] of [['_meta', '*', 0], ['iPhone 15 Pro', '256 GB', 650], ['iPhone 14', '128 GB', 500], ['iPhone 16', '256 GB', 900]]) {
+  sqlite.prepare('INSERT INTO market (model, storage, median, p25, count, updated_at) VALUES (?, ?, ?, ?, 9, 0)').run(model, storage, median, median);
+}
 
 // --- Проверка ленты целиком (сеть подменена) ---
 const ad = (num, title, price = 400) =>
@@ -107,7 +105,7 @@ check('ничего не записано в items', one('SELECT COUNT(*) n FROM
 pages = { 1: ad(10010, 'iPhone 15 Pro 256GB', 500) + ad(10020, 'Nokia 3310') + old };
 let r = await runFeed(env, F);
 check('наблюдение: 2 новых, подходит 1, отправлено 0', [r.unseen, r.matched, r.sent, telegram.length], [2, 1, 0, 0]);
-check('items: запись без msg_id, с классом', one("SELECT model, storage, msg_id, class, city FROM items WHERE id = 'ka:10010'"), { model: 'iPhone 15 Pro', storage: '256 GB', msg_id: null, class: 'nomed', city: 'ph-be' });
+check('items: запись без msg_id, с классом', one("SELECT model, storage, msg_id, class, city FROM items WHERE id = 'ka:10010'"), { model: 'iPhone 15 Pro', storage: '256 GB', msg_id: null, class: 'deal', city: 'ph-be' });
 check('цена записана в prices', one("SELECT model, storage, price FROM prices WHERE id = 'ka:10010'"), { model: 'iPhone 15 Pro', storage: '256 GB', price: 500 });
 check('stats: «прислал бы» 1', one("SELECT sent FROM stats WHERE city = 'ph-be'").sent, 1);
 check('повторная проверка — новых нет', (await runFeed(env, F)).unseen, 0);
@@ -139,9 +137,20 @@ check('сбой Telegram: не отправлено, номер не запом�
 telegramFails = false;
 telegram = [];
 r = await runFeed(env, F);
-check('повтор: отправлено 1, без звука', [r.sent, telegram.length, telegram[0].disable_notification], [1, 1, true]);
-check('items: msg_id сохранён', one("SELECT msg_id FROM items WHERE id = 'ka:30010'").msg_id, 77);
+check('повтор: отправлено 1, звук — по времени суток', [r.sent, telegram.length, Boolean(telegram[0].disable_notification)], [1, 1, isNight()]);
+check('сообщение: ✅ и маржа в % и €', /✅ <b>Уже выгодно: маржа \+28\.6% \(\+200 €\)<\/b>/.test(telegram[0].caption || telegram[0].text), true);
+check('items: msg_id сохранён', one("SELECT msg_id, class FROM items WHERE id = 'ka:30010'"), { msg_id: 77, class: 'deal' });
 check('после отправки — новых нет', (await runFeed(env, F)).unseen, 0);
+
+// Отбор в режиме отправки: 880 € VB — даже после торга цели нет; 800 € VB — выгодно после торга (−10 % → 720 €).
+pages = { 1: ad(30020, 'iPhone 16 256GB', 880) + ad(30030, 'iPhone 16 256GB', 800) + pages[1] };
+telegram = [];
+r = await runFeed(env, F);
+check('отбор: 2 новых, прислано 1', [r.unseen, r.matched, r.sent, telegram.length], [2, 1, 1, 1]);
+check('сообщение: 🤝 и цена для торга', /🤝 <b>Выгодно после торга: предложите 720 €<\/b>\nпри 720 € маржа \+25% \(\+180 €\) · запас торга ~10% \(VB\)/.test(telegram[0].caption || telegram[0].text), true);
+check('items: невыгодное записано без msg_id', one("SELECT msg_id, class FROM items WHERE id = 'ka:30020'"), { msg_id: null, class: 'low' });
+check('items: класс haggle', one("SELECT msg_id, class FROM items WHERE id = 'ka:30030'"), { msg_id: 77, class: 'haggle' });
+check('невыгодное запомнено — новых нет', (await runFeed(env, F)).unseen, 0);
 
 // Выключенная лента и сбой сайта.
 sqlite.prepare("UPDATE feeds SET muted = 1 WHERE feed = 'ph-be'").run();

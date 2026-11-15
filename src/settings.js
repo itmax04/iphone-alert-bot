@@ -4,6 +4,7 @@
 // Лимит модели важнее общего максимума. Объявления без цены («VB», «Zu verschenken») не отсеиваются.
 
 import { identifyQuery } from './catalog.js';
+import { DEFAULT_SELECT } from './select.js';
 
 const DEFAULT = { min: null, max: null, models: {} };
 
@@ -29,6 +30,18 @@ export async function getMode(env) {
 export function saveMode(env, mode) {
   return env.DB.prepare("INSERT INTO settings (key, value) VALUES ('mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
     .bind(JSON.stringify(mode))
+    .run();
+}
+
+/** Настройки отбора (src/select.js): { target %, haggle % — максимум запаса торга, minprofit € или null }. */
+export async function getSelect(env) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'select'").first();
+  return row ? { ...DEFAULT_SELECT, ...JSON.parse(row.value) } : { ...DEFAULT_SELECT };
+}
+
+export function saveSelect(env, select) {
+  return env.DB.prepare("INSERT INTO settings (key, value) VALUES ('select', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+    .bind(JSON.stringify(select))
     .run();
 }
 
