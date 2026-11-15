@@ -1,19 +1,21 @@
 # Handoff — iphone-alert-bot: экономия D1 и переделка поиска
 
 ## Идентичность
-- Репозиторий: `itmax04/iphone-alert-bot`, локально `~/Developer/iphone-alert-bot`, ветка `main`, HEAD `0d7571e` (этап 3, запушен 14.11.2026).
+- Репозиторий: `itmax04/iphone-alert-bot`, локально `~/Developer/iphone-alert-bot`, ветка `main`, код этапа 4 — коммит `9851764` (запушен 15.11.2026).
+- **Этап 4 задеплоен 15.11.2026** (версия 7b6650c3; откат — `wrangler rollback` на 8e831d5c, этап 3). Режим по-прежнему `watch`;
+  отправку включает только владелец (`/mode send`). Новые файлы: `src/select.js`, `scripts/test_select.js`; изменены `src/feeds.js`,
+  `kleinanzeigen.js`, `settings.js`, `commands.js`, `scripts/test_feeds.js`, `README.md`, `AGENTS.md`.
 - **Этап 3 задеплоен 15.11.2026** (версия 8e831d5c; коммиты `0d7571e`, `c2b50ab` в `origin/main`). Миграция 005 применена, `items.class` есть. Файлы этапа 3:
   новые `src/feeds.js`, `scripts/test_feeds.js`, `db/migrations/005_feeds.sql`; изменены `src/index.js`, `commands.js`,
   `filters.js`, `kleinanzeigen.js`, `settings.js`, `messages.js`, `db/schema.sql`, `scripts/check.js`, `scripts/test_models.js`,
   `README.md`, `AGENTS.md`, `wrangler.toml`, `package.json`; удалены (git rm) `src/cities.js`, `src/mv.js`, `src/deals.js`,
   `scripts/seed_prices.js`, `scripts/sweep_mv.js`.
-- В продакшене работает версия этапа 2 (9afeb298): опрос 23 городов, MV, лента Германии.
 
 ## Цель и рамки
 Четыре улучшения (запрос владельца):
 1. Категории: iPhone **11+**, iPad, MacBook, Apple Watch (Series 7+/Ultra), Samsung S21+ / Z Fold/Flip 3+, Pixel 6+. — сделано в коде этапа 3.
 2. География: региональные ленты — вся MV (`l61`), Берлин (`l3331`), Гамбург (`l9409`); опрос 23 городов и лента «вся Германия» убраны. — сделано в коде этапа 3.
-3. Отбор (этап 4, НЕ сделан): эталон — медиана Kleinanzeigen по той же модели (без вычета расходов). Главное — **потенциал торга**:
+3. Отбор (этап 4, СДЕЛАН 15.11, кроме ночного обхода и сводки в 8:00 — нет свободных cron): эталон — медиана Kleinanzeigen по той же модели (без вычета расходов). Главное — **потенциал торга**:
    целевая цена = медиана / 1,2 (решение владельца 14.11: **только процент +20 %, без минимума в евро**;
    считается **только маржа**: медиана − цена покупки, в % от цены покупки; никаких других расходов (дорога, комиссии,
    доставка) не вычитать; в сообщении показывать маржу в % и €; команда /minprofit — по умолчанию выключена); запас торга по сигналам: VB 10 %, +5 % за срочность
@@ -85,7 +87,29 @@
 - OLX.ua: с Mac владельца 403; из Cloudflare не проверено. Защиту не обходить.
 - Удалить старые таблицы отдельной миграцией 006 — после включения отправки.
 
-## Следующий шаг
+## Этап 4 (15.11.2026) — сделано и проверено
+- Сделано: `src/select.js` (`haggleOf`, `evaluate`, `parseSelectArg`, `DEFAULT_SELECT` = target 20, haggle 20, minprofit null);
+  `parseArticle` отдаёт `posted` и `oldPrice`; `runFeed` присылает только `deal`/`haggle`, в `items` пишет все классы,
+  `stats.sent` = deal + haggle; звук — `isNight` (22:00–08:00 Берлин без звука); команды `/target`, `/haggle`, `/minprofit`
+  (settings, ключ `select`); `/margin` и 🔥 убраны (функции в `market.js` остались без вызовов); карточка `/feeds` показывает только ✅/🤝.
+- PASS (рабочее дерево = `9851764`): `node --check` всех файлов; `test_models.js`, `test_market.js`, `test_feeds.js`, `test_select.js` — ALL PASS;
+  `npm run check` — 12 лент; `wrangler deploy --dry-run` — 92,45 КиБ; deploy — версия 7b6650c3.
+- NOT RUN / не закончено: **проверка tail после deploy этапа 4** (outcome, exceptions, cpuTime ≤ 10–15 мс) — tail запущен в фоне
+  прошлой сессией, результат не прочитан; `GET /setup` (владелец, нужен для меню с `/target`, `/haggle`, `/minprofit`); команды в Telegram.
+  Независимое ревью не проводилось (самопроверка диффа).
+- Числа наблюдения (15.11, первые ~25 минут этапа 3, 28 объявлений): deal 1, low 8, high 11, nomed 5, flag 3. Оценка с отбором —
+  десятки сообщений в сутки вместо ~575; уточнить по `SELECT class, COUNT(*) FROM items GROUP BY class` через несколько часов.
+- В `market` 158 ключей; модели без медианы (`nomed`) не присылаются, пока не накопится ≥ 5 цен и не пройдёт ночной пересчёт (03:20).
+- Отложено: ночной обход регионов и сводка в 8:00 (нет свободных cron); миграция 006 (удаление старых таблиц).
+
+## Следующий шаг (актуальный)
+A. Проверить этап 4 в продакшене: `nohup npx --yes wrangler@4 tail iphone-alert-bot --format json > файл &` (на macOS нет `timeout`),
+   10–15 запусков: outcome ok, exceptions 0, cpuTime ≤ 10–15 мс; при exceptions или cpuTime стабильно > 15 мс — остановиться,
+   показать вывод владельцу, откат `wrangler rollback` на 8e831d5c. Затем `SELECT class, COUNT(*) FROM items WHERE sent_at > … GROUP BY class`.
+B. Владелец: `GET /setup?key=<RUN_KEY>`, проверить `/target`, `/haggle`, `/minprofit`, `/stats`, `/feeds`; когда готов — `/mode send`.
+C. Через сутки: `npx --yes wrangler@4 d1 info iphone-alert-bot` (rows_read_24h < 1 млн), число сообщений в день.
+
+## Следующий шаг (история, выполнено)
 0. ~~Выкладка~~ ВЫПОЛНЕНО 15.11: tail — outcome ok, exceptions 0, cpuTime 10–14 мс (≈ 5 запусков, выборка небольшая); `feeds`: 12 строк, `initialized = 1`; у `aw-hh` разовый `HTTP 403` (fail_count 1). Осталось: владелец вызывает `GET /setup?key=<RUN_KEY>`, проверяет `/feeds`, `/mode`, `/stats`. (Было: после 00:00 UTC (≈ 01:00 по Берлину 15.11):** проверить `SELECT class FROM items LIMIT 1` (если колонки нет — `ALTER TABLE items ADD COLUMN class TEXT`), затем `npm run deploy` → `npm run tail` в фоне (outcome ok, cpuTime ≤ 10–15 мс) → `SELECT feed, initialized, page, last_ok, last_error FROM feeds` через ~18 мин (12 строк, `initialized = 1`) → владелец вызывает `GET /setup?key=<RUN_KEY>` и проверяет `/feeds`, `/mode`, `/stats`. Откат: `wrangler rollback` (9afeb298).
 1. С разрешения владельца: commit + push этапа 3 → миграция `005_feeds.sql` на удалённой D1 → `npm run deploy` → `npm run tail`
    (outcome ok, cpuTime ≈ ≤ 10–15 мс) → владелец вызывает `GET /setup?key=<RUN_KEY>`.
