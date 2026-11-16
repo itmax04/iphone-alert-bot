@@ -7,11 +7,13 @@ import { parseSelectArg } from './select.js';
 import { sellerMessages } from './messages.js';
 import { FEEDS, GROUPS, getFeedState, frequencyOf, berlinDay } from './feeds.js';
 import { call, sendText, escapeHtml } from './telegram.js';
+import { parseFoundArgs, decodeFilter, showFound, DEFAULT_FILTER, encodeFilter } from './found.js';
 
 const HOUR = 3600 * 1000;
 const FEED_ITEMS_LIMIT = 8;
 
 export const COMMANDS = [
+  { command: 'found', description: 'Давно висят: недельные и двухнедельные объявления' },
   { command: 'feeds', description: 'Ленты: последние объявления, вкл/выкл' },
   { command: 'mode', description: 'Режим: наблюдение или отправка' },
   { command: 'target', description: 'Цель: маржа к медиане рынка, %' },
@@ -51,7 +53,7 @@ async function feedsMenu(env) {
     env,
     '🗂 <b>Ленты</b>\nНажмите на ленту — покажу последние объявления и дам выключить или включить её.\n' +
       `${GROUPS.map((g) => `${g.icon} ${g.name}`).join(' · ')} · 🔕 выключена · (N) — ${mode === 'send' ? 'прислано' : 'прислал бы'} сегодня`,
-    { reply_markup: { inline_keyboard: GROUPS.map((g) => FEEDS.filter((f) => f.group === g).map(button)) } },
+    { reply_markup: { inline_keyboard: [[{ text: '🕰 Давно висят', callback_data: encodeFilter(DEFAULT_FILTER) }], ...GROUPS.map((g) => FEEDS.filter((f) => f.group === g).map(button))] } },
   );
 }
 
@@ -268,7 +270,7 @@ async function commandHelp(env) {
       'Дефекты, аксессуары, признаки обмана и модели без медианы рынка не присылаю. Днём со звуком, с 22:00 до 08:00 — без звука.\n\n' +
       '<b>В каждом объявлении</b>\n💰 сравнение с обычной ценой на Kleinanzeigen · 📈 справка по вашей цене продажи (/sell) · 🔁 обмен\n' +
       '✍️ Написать продавцу — готовое сообщение на немецком (два варианта: «ещё доступен?» и с ценой −10%)\n\n' +
-      '<b>Команды</b>\n/feeds — ленты: последние объявления, выключить/включить\n/mode — наблюдение (только считать) или отправка\n' +
+      '<b>Команды</b>\n/found — давно висящие, 7+ и 14+ дней (<code>/found 14 be mac</code>)\n/feeds — ленты: последние объявления, выключить/включить\n/mode — наблюдение (только считать) или отправка\n' +
       '/target — цель маржи, %\n/haggle — максимальный запас торга, %\n/minprofit — минимальная маржа в €\n' +
       '/sell — ваши цены продажи в Украине (₴)\n/price — фильтр цены (общий и по моделям)\n' +
       '/models — какие модели распознаю\n/stats — статистика за сегодня\n\n' +
@@ -291,6 +293,7 @@ export async function handleUpdate(env, update) {
       if (FEEDS.some((x) => x.id === arg)) await toggleMute(env, arg);
       return feedCard(env, arg, q.message);
     }
+    if (kind === 'fd') return showFound(env, decodeFilter(arg), q.message);
     if (kind === 'lt') return sendSellerMessage(env, arg);
     return;
   }
@@ -298,6 +301,10 @@ export async function handleUpdate(env, update) {
   const text = (update.message?.text || '').trim();
   const cmd = text.toLowerCase().split(/[\s@]/)[0];
   if (['/feeds', '/cities', 'ленты'].includes(cmd)) return feedsMenu(env);
+  if (['/found', '/найдено', 'найдено'].includes(cmd)) {
+    const r = parseFoundArgs(text);
+    return r.error ? sendText(env, `⚠️ ${escapeHtml(r.error)}`) : showFound(env, r.filter);
+  }
   if (['/mode', 'режим'].includes(cmd)) return commandMode(env, text);
   if (['/price', 'цена'].includes(cmd)) return commandPrice(env, text);
   if (['/sell', 'продажа'].includes(cmd)) return commandSell(env, text);
