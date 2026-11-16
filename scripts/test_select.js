@@ -3,6 +3,7 @@
 import { ageDays, haggleOf, evaluate, parseSelectArg, DEFAULT_SELECT } from '../src/select.js';
 import { parseArticle } from '../src/kleinanzeigen.js';
 import { isNight } from '../src/feeds.js';
+import { sellerMessages } from '../src/messages.js';
 
 let failed = 0;
 const check = (name, got, want) => {
@@ -83,6 +84,23 @@ check('ночь: 23:00 по Берлину', isNight(Date.UTC(2026, 10, 15, 22))
 check('ночь: 07:59', isNight(Date.UTC(2026, 10, 15, 6, 59)), true);
 check('день: 08:00', isNight(Date.UTC(2026, 10, 15, 7)), false);
 check('день: 21:59', isNight(Date.UTC(2026, 10, 15, 20, 59)), false);
+
+// --- Текст продавцу: та же цена, что в карточке; без вопроса про iCloud ---
+{
+  const median = { median: 400 };
+  const ev = evaluate(it({ price: 400, negotiable: true, description: 'muss weg', oldPrice: 450 }), median, [], [], { target: 20, haggle: 20, minprofit: null }, NOW);
+  check('карточка: 400 € VB + срочность + снижение → 🤝 320 €', [ev.cls, ev.offer], ['haggle', 320]);
+  const row = { model: 'iPhone 16 Pro', storage: '256 GB', price: 400, cur_price: null, s_offer: ev.offer, battery: null };
+  const m = sellerMessages(row, 'Völschow');
+  check('текст продавцу: цена из карточки', [m.offer, m.fromCard], [320, true]);
+  check('текст: ещё доступен', m.de,
+    'Hallo,\n\nich interessiere mich für Ihr iPhone 16 Pro 256 GB. Ist es noch verfügbar?\n\nIch könnte es zeitnah in Völschow persönlich abholen und bar bezahlen.\n\nViele Grüße\n\nMaksym');
+  check('текст: с предложением цены', m.deOffer,
+    'Hallo,\n\nich interessiere mich für Ihr iPhone 16 Pro 256 GB. Ist es noch verfügbar?\nWären Sie mit 320 € einverstanden?\n\nIch könnte es zeitnah in Völschow persönlich abholen und bar bezahlen.\n\nViele Grüße\n\nMaksym');
+  check('текст: без iCloud и аккумулятора', /iCloud|Akku/.test(m.de + m.deOffer), false);
+  check('давно висят: s_offer после перепроверки', sellerMessages({ ...row, price: 500, cur_price: 450, s_offer: 360 }, 'X').offer, 360);
+  check('без предложения в карточке → −10 %', [sellerMessages({ ...row, s_offer: null }, 'X').offer, sellerMessages({ ...row, s_offer: null }, 'X').fromCard], [360, false]);
+}
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

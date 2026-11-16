@@ -132,7 +132,7 @@ async function sendSellerMessage(env, itemId) {
     '<b>1. Ещё доступен?</b>',
     `<pre>${escapeHtml(msg.de)}</pre>`,
   ];
-  if (msg.deOffer) parts.push('', `<b>2. С предложением цены: ${msg.offer} €</b> (−10%)`, `<pre>${escapeHtml(msg.deOffer)}</pre>`);
+  if (msg.deOffer) parts.push('', `<b>2. С предложением цены: ${msg.offer} €</b> ${msg.fromCard ? '' : ' (−10%)'}`, `<pre>${escapeHtml(msg.deOffer)}</pre>`);
   parts.push(`<blockquote expandable>🇷🇺 Перевод:\n${escapeHtml(msg.ruOffer || msg.ru)}</blockquote>`);
   await sendText(env, parts.join('\n'), { reply_markup: { inline_keyboard: [[{ text: '🔗 Открыть объявление', url: item.url }]] } });
   if (item.status === 'new') await env.DB.prepare("UPDATE items SET status = 'opened' WHERE id = ?").bind(itemId).run();
