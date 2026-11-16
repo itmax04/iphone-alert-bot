@@ -36,7 +36,15 @@ CREATE TABLE IF NOT EXISTS items (
   sent_at INTEGER NOT NULL,
   msg_id INTEGER,                -- NULL — не присылалось (режим наблюдения)
   status TEXT NOT NULL DEFAULT 'new',
-  class TEXT                     -- deal | low | high | nomed | flag (src/feeds.js, classOf)
+  class TEXT,                    -- deal | haggle | low | high | nomed | flag (src/select.js, evaluate)
+  next_at INTEGER,               -- этап 5 («давно висят»): когда перепроверить; NULL — не кандидат
+  check_n INTEGER NOT NULL DEFAULT 0,
+  cur_price REAL,
+  checked_at INTEGER,
+  gone INTEGER NOT NULL DEFAULT 0,
+  top_price REAL,
+  s_offer REAL,
+  s_pct REAL
 );
 CREATE INDEX IF NOT EXISTS items_city_sent ON items(city, sent_at);
 
@@ -69,3 +77,5 @@ CREATE TABLE IF NOT EXISTS market (
 -- Индексы под ежесуточную чистку.
 CREATE INDEX IF NOT EXISTS prices_seen_at ON prices(seen_at);
 CREATE INDEX IF NOT EXISTS items_sent_at ON items(sent_at);
+CREATE INDEX IF NOT EXISTS items_next ON items(next_at) WHERE next_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS items_checked ON items(checked_at) WHERE checked_at IS NOT NULL;

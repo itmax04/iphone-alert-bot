@@ -37,7 +37,7 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
 1. Регион или группа: запись в `REGIONS` / `GROUPS` в `src/feeds.js` (`slug` и `loc` — из URL поиска Kleinanzeigen;
    без поискового слова адрес кончается на `c<категория><место>`, со словом — `<слово>/k0c<категория><место>`).
    Формат проверь обычным запросом (`node scripts/check.js <id>`). Первый запуск новой ленты — молчаливый.
-2. Изменения схемы (последняя — `006_drop_old_tables.sql`): новый файл `db/migrations/00N_*.sql` **и** то же в `db/schema.sql`; применить
+2. Изменения схемы (последняя — `007_stale.sql`): новый файл `db/migrations/00N_*.sql` **и** то же в `db/schema.sql`; применить
    `npx wrangler d1 execute iphone-alert-bot --remote --file db/migrations/00N_*.sql` (с разрешения владельца).
 3. Команды Telegram: `COMMANDS` в `src/commands.js` → после публикации `GET /setup?key=…`.
 4. Настройки владельца (`/mode`, `/price`, `/sell`, `/target`, `/haggle`, `/minprofit`) живут в `settings` (D1) — не зашивай их в код.
@@ -52,6 +52,13 @@ npm run deploy
 npm run tail                       # cron-запуски: outcome ok, без exceptions, cpuTime ≈ ≤ 10–15 мс
 curl "https://iphone-alert-bot.<subdomain>.workers.dev/run?key=$(cat .run_key)&feed=ph-be&debug=1"
 ```
+
+## «Давно висят» (`src/stale.js`)
+
+- Перепроверка — **одна страница объявления за запуск**, только ночью (01:00–06:00) вместо ленты в каждом втором запуске (`isRecheckSlot`).
+  Выборка очереди — по частичному индексу `items_next`; не делай запросов к `items` по `sent_at`-диапазону (тысячи строк).
+- Порядок выкладки: миграция 007 → deploy (иначе `runFeed` падает на отсутствующих колонках `items`).
+- Не писать продавцам автоматически: только кнопка «✍️» с готовым текстом.
 
 ## Частые ловушки
 

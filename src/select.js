@@ -12,7 +12,7 @@ export const SEND_CLASSES = ['deal', 'haggle'];
 // Запас торга, % от цены: VB — 10, срочность +5, давно висит или цена уже снижена +5, Festpreis — 0; не больше MAX_HAGGLE.
 const MAX_HAGGLE = 20;
 const URGENT_RE = /muss\s+weg|umzug|dringend|schnell/i;
-const FIXED_RE = /(?<!kein\s)(?:festpreis|fixpreis)|keine\s+verhandlung|nicht\s+verhandelbar/i;
+export const FIXED_RE = /(?<!kein\s)(?:festpreis|fixpreis)|keine\s+verhandlung|nicht\s+verhandelbar/i;
 const STALE_DAYS = 7;
 
 /** Сколько дней объявлению: «Heute, …» — 0, «Gestern, …» — 1, «дд.мм.гггг» — по дате; неизвестно — null. */
@@ -50,7 +50,7 @@ export function haggleOf(item, now = Date.now()) {
 }
 
 const flagged = (tags) => tags.some((t) => t.startsWith('🔧') || t.startsWith('🧩'));
-const round5 = (n) => Math.round(n / 5) * 5;
+export const round5 = (n) => Math.round(n / 5) * 5;
 const gain = (median, buy) => ({ marginEur: Math.round(median - buy), marginPct: Math.round(((median - buy) / buy) * 1000) / 10 });
 
 /**

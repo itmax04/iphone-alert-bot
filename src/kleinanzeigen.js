@@ -18,7 +18,7 @@ export function feedUrl(feed, page = 1) {
   );
 }
 
-function parseNumber(text) {
+export function parseNumber(text) {
   if (text == null) return null;
   const m = String(text).replace(/\./g, '').match(/\d+(,\d+)?/);
   return m ? parseFloat(m[0].replace(',', '.')) : null;

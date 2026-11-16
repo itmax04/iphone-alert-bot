@@ -11,6 +11,7 @@ import { recognize, batteryOf, tagsOf } from './filters.js';
 import { getPriceFilter, priceRejectReason, getMode, getSelect } from './settings.js';
 import { eurRate, getSellTable, marginOf, recordPrice, marketMedian, scamAndDeal } from './market.js';
 import { evaluate, SEND_CLASSES } from './select.js';
+import { staleCandidateAt } from './stale.js';
 import { sendText, sendItem, escapeHtml } from './telegram.js';
 
 export const REGIONS = [
@@ -277,9 +278,9 @@ export async function runFeed(env, feed) {
       // items: все оценённые объявления с классом; msg_id — только у присланных.
       writes.push(
         env.DB.prepare(
-          `INSERT OR REPLACE INTO items (id, city, model, storage, battery, price, negotiable, title, location, url, sent_at, msg_id, class)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(item.id, feed.id, rec.model, rec.variant, battery, item.price, item.negotiable ? 1 : 0, item.title.slice(0, 200), item.location, item.url, now, msgId, ev.cls),
+          `INSERT OR REPLACE INTO items (id, city, model, storage, battery, price, negotiable, title, location, url, sent_at, msg_id, class, next_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(item.id, feed.id, rec.model, rec.variant, battery, item.price, item.negotiable ? 1 : 0, item.title.slice(0, 200), item.location, item.url, now, msgId, ev.cls, staleCandidateAt(item, market, ev.cls, sel, now)),
       );
     }
   }

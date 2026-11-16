@@ -12,6 +12,7 @@ import { describeSellTable } from './settings.js';
 import { eurRate, getSellTable, recomputeMarket } from './market.js';
 import { handleUpdate, statsText, COMMANDS } from './commands.js';
 import { FEEDS, CRON_FAST, feedFor, runFeed, berlinDay } from './feeds.js';
+import { isRecheckSlot, recheckOne, staleReport, expireQueue } from './stale.js';
 import { sendText, call, escapeHtml } from './telegram.js';
 
 const KEEP_DAYS = 30;
@@ -50,11 +51,16 @@ async function dailyReport(env) {
 export default {
   async scheduled(event, env) {
     const date = new Date(event.scheduledTime);
-    await runFeed(env, feedFor(event.cron, date)).catch((e) => console.error('run failed', e));
+    // Ночью каждый второй запуск вместо ленты перепроверяет одно давно висящее объявление (src/stale.js).
+    if (isRecheckSlot(event.cron !== CRON_FAST, date)) await recheckOne(env).catch((e) => console.error('recheck failed', e));
+    else await runFeed(env, feedFor(event.cron, date)).catch((e) => console.error('run failed', e));
     if (event.cron !== CRON_FAST) return; // отчёты и чистка — только в основном расписании
 
     const { hour, minute } = berlinParts(date);
-    if (hour === DAILY_REPORT_HOUR && minute === 0) await dailyReport(env).catch((e) => console.error('report failed', e));
+    if (hour === DAILY_REPORT_HOUR && minute === 0) {
+      await dailyReport(env).catch((e) => console.error('report failed', e));
+      await staleReport(env).catch((e) => console.error('stale report failed', e));
+    }
     const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Berlin', weekday: 'short' }).format(date);
     if (weekday === 'Mon' && hour === 10 && minute === 0) await sellReminder(env).catch((e) => console.error('reminder failed', e));
     // Раз в сутки ночью (Берлин): пересчёт медиан рынка, затем чистка старых записей.
@@ -64,12 +70,13 @@ export default {
       await env.DB.batch([
         env.DB.prepare('DELETE FROM items WHERE sent_at < ?').bind(cutoff),
         env.DB.prepare('DELETE FROM prices WHERE seen_at < ?').bind(cutoff),
+        expireQueue(env),
       ]);
     }
   },
 
   // /telegram — команды и кнопки (секрет в заголовке знает только Telegram).
-  // /setup?key=<RUN_KEY> — подключить webhook и меню. /run?key=<RUN_KEY>&feed=<id ленты>|report|market — ручной запуск.
+  // /setup?key=<RUN_KEY> — подключить webhook и меню. /run?key=<RUN_KEY>&feed=<id ленты>|report|stale|recheck|market — ручной запуск.
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/telegram' && request.method === 'POST') {
@@ -101,6 +108,8 @@ export default {
         await dailyReport(env);
         return Response.json({ report: 'sent' });
       }
+      if (id === 'stale') return Response.json(await staleReport(env)); // отчёт «давно висят» сейчас
+      if (id === 'recheck') return Response.json((await recheckOne(env)) ?? { queue: 'empty' }); // перепроверить одно объявление сейчас
       if (id === 'market') return Response.json(await recomputeMarket(env).then(() => ({ market: 'recomputed' })));
       const feed = FEEDS.find((f) => f.id === id);
       if (!feed) return Response.json({ error: 'unknown feed', feeds: FEEDS.map((f) => f.id) }, { status: 400 });
