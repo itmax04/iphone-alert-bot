@@ -8,7 +8,7 @@
 
 import { fetchFeed, parseArticle } from './kleinanzeigen.js';
 import { recognize, batteryOf, tagsOf } from './filters.js';
-import { getPriceFilter, priceRejectReason, getMode, getSelect } from './settings.js';
+import { getPriceFilter, priceRejectReason, priceCap, budgetReject, getMode, getSelect } from './settings.js';
 import { eurRate, getSellTable, marginOf, recordPrice, marketMedian, scamAndDeal } from './market.js';
 import { evaluate, SEND_CLASSES } from './select.js';
 import { staleCandidateAt } from './stale.js';
@@ -157,7 +157,7 @@ export function itemKeyboard(item, feed) {
   };
 }
 
-function formatItem(item, feed, rec, battery, insight) {
+export function formatItem(item, feed, rec, battery, insight) {
   const head = [rec.model, rec.variant, item.price != null ? `${item.price} €${item.negotiable ? ' VB' : ''}` : 'цена не указана']
     .filter(Boolean)
     .join(' · ');
@@ -170,6 +170,7 @@ function formatItem(item, feed, rec, battery, insight) {
       `🤝 <b>Выгодно после торга: предложите ${ev.offer} €</b>`,
       `при ${ev.offer} € маржа +${ev.marginPct}% (+${ev.marginEur} €) · запас торга ~${ev.percent}% (${escapeHtml(ev.reasons.join(', '))})`,
     );
+    if (insight.cap != null && item.price > insight.cap) lines.push(`💶 В бюджет ${insight.cap} € — только после торга`);
   }
   lines.push(`${feed.group.icon} <b>${escapeHtml(head)}</b>`, escapeHtml(item.title), `📍 ${escapeHtml(item.location || feed.region.name)} · ${escapeHtml(feed.name)}`);
   if (battery) lines.push(`🔋 Akku ${battery}%`);
@@ -250,7 +251,7 @@ export async function runFeed(env, feed) {
       // Цены всех распознанных — в статистику рынка (даже если по фильтру цены не пришлём).
       const priceWrite = recordPrice(env, item, rec.model, rec.variant, now);
       if (priceWrite) writes.push(priceWrite);
-      if (priceRejectReason(item, rec.model, priceFilter)) {
+      if (priceRejectReason(item, rec.model, priceFilter, feed.group.key, sel.haggle)) {
         done.push(num);
         continue;
       }
@@ -259,13 +260,19 @@ export async function runFeed(env, feed) {
       const { warnings, dealPercent } = scamAndDeal(item, market);
       const tags = tagsOf(item, rec);
       const ev = evaluate(item, market, tags, warnings, sel, now);
+      // Потолок /price — по цене, которую реально заплатить (для 🤝 — по предложению после торга).
+      const cap = priceCap(priceFilter, rec.model, feed.group.key);
+      if (budgetReject(item, ev, cap)) {
+        done.push(num);
+        continue;
+      }
       const wanted = SEND_CLASSES.includes(ev.cls); // ✅ уже выгодно или 🤝 выгодно после торга
       let msgId = null;
       if (send && wanted) {
         const margin = marginOf(item, rec.model, rec.variant, sellTable, rate);
         try {
           // Днём со звуком, ночью без.
-          const res = await sendItem(env, formatItem(item, feed, rec, battery, { market, margin, warnings, dealPercent, ev, tags }), item.image, itemKeyboard(item, feed), silent);
+          const res = await sendItem(env, formatItem(item, feed, rec, battery, { market, margin, warnings, dealPercent, ev, tags, cap }), item.image, itemKeyboard(item, feed), silent);
           msgId = res?.result?.message_id ?? null;
           sent += 1;
         } catch (e) {

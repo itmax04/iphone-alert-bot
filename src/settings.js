@@ -1,12 +1,22 @@
 // Фильтр цены. Хранится в D1 (settings, key = 'price'), задаётся в боте командой /price.
 //   min / max — общий диапазон цены, € (null — без ограничения);
+//   groups — максимальная цена для группы лент (ph / tab / mac / aw), например { "ph": 300, "mac": 600 };
 //   models — максимальная цена для конкретной модели, например { "iPhone 15 Pro": 550 }.
-// Лимит модели важнее общего максимума. Объявления без цены («VB», «Zu verschenken») не отсеиваются.
+// Потолок: модель → группа → общий max. Он сравнивается с ценой, которую реально заплатить: для 🤝 — с ценой
+// предложения после торга (select.js), иначе с ценой объявления. Объявления без цены не отсеиваются.
 
 import { identifyQuery } from './catalog.js';
 import { DEFAULT_SELECT } from './select.js';
 
-const DEFAULT = { min: null, max: null, models: {} };
+const DEFAULT = { min: null, max: null, groups: {}, models: {} };
+
+// Группы лент для /price: ключ (src/feeds.js GROUPS) → слова в команде.
+export const PRICE_GROUPS = {
+  ph: { name: 'Телефоны', words: ['ph', 'phone', 'phones', 'телефоны', 'телефон'] },
+  tab: { name: 'Планшеты', words: ['tab', 'ipad', 'tablet', 'tablets', 'планшеты', 'планшет'] },
+  mac: { name: 'MacBook', words: ['mac', 'macbook', 'макбук'] },
+  aw: { name: 'Apple Watch', words: ['aw', 'watch', 'часы'] },
+};
 
 export async function getPriceFilter(env) {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'price'").first();
@@ -45,13 +55,28 @@ export function saveSelect(env, select) {
     .run();
 }
 
-/** Причина отказа по цене или null. */
-export function priceRejectReason(item, model, filter) {
+/** Потолок цены для модели и группы (ph/tab/mac/aw): модель → группа → общий max; null — без потолка. */
+export function priceCap(filter, model, group) {
+  return filter.models?.[model] ?? filter.groups?.[group] ?? filter.max ?? null;
+}
+
+/**
+ * Причина отказа по цене или null. maxHaggle — наибольший возможный запас торга, %: объявление дороже потолка
+ * не отсеивается сразу, если после торга цена может в него войти (окончательно решает budgetReject после evaluate).
+ */
+export function priceRejectReason(item, model, filter, group, maxHaggle = 0) {
   if (item.price == null) return null;
-  const cap = filter.models?.[model] ?? filter.max;
-  if (cap != null && item.price > cap) return `${item.price} € > ${cap} €`;
   if (filter.min != null && item.price < filter.min) return `${item.price} € < ${filter.min} €`;
+  const cap = priceCap(filter, model, group);
+  if (cap != null && Math.round((item.price * (1 - maxHaggle / 100)) / 5) * 5 > cap) return `${item.price} € > ${cap} €`;
   return null;
+}
+
+/** После оценки: цена, которую реально заплатить (для 🤝 — предложение), выше потолка → причина отказа. */
+export function budgetReject(item, ev, cap) {
+  if (cap == null || item.price == null) return null;
+  const pay = ev.cls === 'haggle' ? ev.offer : item.price;
+  return pay > cap ? `${pay} € > ${cap} €` : null;
 }
 
 /**
@@ -69,7 +94,7 @@ export function applyPriceCommand(text, current) {
   const args = text.replace(/^\/price(@\w+)?/i, '').replace(/^цена/i, '').trim();
   const f = { ...current, models: { ...(current.models || {}) } };
   if (!args) return { filter: f, message: null };
-  if (/^(off|выкл|сброс|reset)$/i.test(args)) return { filter: { ...DEFAULT, models: {} }, message: 'Все ограничения цены сняты.' };
+  if (/^(off|выкл|сброс|reset)$/i.test(args)) return { filter: { ...DEFAULT, groups: {}, models: {} }, message: 'Все ограничения цены сняты.' };
 
   let m = args.match(/^(\d+)\s*[-–]\s*(\d+)$/);
   if (m) {
@@ -85,6 +110,17 @@ export function applyPriceCommand(text, current) {
   if (m) return { filter: { ...f, max: parseInt(m[2], 10) }, message: `Максимум: ${parseInt(m[2], 10)} €.` };
 
   m = args.match(/^(.+?)\s+(\d+|off)$/i);
+  const group = m && Object.keys(PRICE_GROUPS).find((k) => PRICE_GROUPS[k].words.includes(m[1].toLowerCase()));
+  if (group) {
+    const groups = { ...(f.groups || {}) };
+    const name = PRICE_GROUPS[group].name;
+    if (/off/i.test(m[2])) {
+      delete groups[group];
+      return { filter: { ...f, groups }, message: `Лимит для группы «${name}» снят.` };
+    }
+    groups[group] = parseInt(m[2], 10);
+    return { filter: { ...f, groups }, message: `${name}: максимум ${groups[group]} €.` };
+  }
   if (m) {
     const model = identifyQuery(m[1])?.model;
     if (!model) return { error: `Не понял модель «${m[1]}». Пример: /price 15 Pro 550 · список моделей: /models` };
@@ -146,6 +182,11 @@ export function describePriceFilter(f) {
   const lines = [];
   if (f.min == null && f.max == null) lines.push('Общий диапазон: без ограничений');
   else lines.push(`Общий диапазон: ${f.min != null ? `от ${f.min} €` : ''}${f.min != null && f.max != null ? ' ' : ''}${f.max != null ? `до ${f.max} €` : ''}`);
+  const groups = Object.keys(PRICE_GROUPS).filter((k) => f.groups?.[k] != null);
+  if (groups.length) {
+    lines.push('Лимиты групп:');
+    for (const k of groups) lines.push(`  • ${PRICE_GROUPS[k].name} — до ${f.groups[k]} €`);
+  }
   const models = Object.entries(f.models || {}).sort();
   if (models.length) {
     lines.push('Лимиты моделей:');

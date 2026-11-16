@@ -1,9 +1,11 @@
 // /found — «давно висят»: объявления, которые бот перепроверил на 7-й, 10-й или 14-й день (src/stale.js), с ценой
 // предложения и маржей к медиане. Работает в любом режиме /mode. Фильтры: возраст (7+ / 14+ дней), «подходит» / все
-// перепроверенные, регион, группа; пагинация. Запрос идёт по частичному индексу items_checked и всегда с LIMIT.
+// перепроверенные, регион, группа; потолок /price (модель → группа → общий) по цене, которую реально заплатить
+// (предложение s_offer, иначе текущая цена); пагинация. Запрос идёт по частичному индексу items_checked и с LIMIT.
 
 import { FEEDS, GROUPS, REGIONS } from './feeds.js';
 import { call, sendText, escapeHtml } from './telegram.js';
+import { getPriceFilter } from './settings.js';
 
 export const PAGE_SIZE = 5;
 export const MAX_PAGE = 9;
@@ -39,10 +41,38 @@ export function decodeFilter(arg) {
 }
 
 /** SQL: PAGE_SIZE + 1 строк (лишняя — признак следующей страницы). Только живые, уже перепроверенные. */
-export function foundQuery(f, now = Date.now()) {
+/** SQL-условие потолка /price или null: COALESCE(s_offer, cur_price, price) <= потолок модели / группы / общий. */
+export function capCondition(price = {}) {
+  const args = [];
+  let expr = price.max != null ? '?' : 'NULL';
+  if (price.max != null) args.push(price.max);
+  const groups = Object.entries(price.groups || {}).filter(([, v]) => v != null);
+  if (groups.length) {
+    const whens = groups.map(([g, v]) => {
+      const ids = FEEDS.filter((x) => x.group.key === g).map((x) => x.id);
+      return { sql: `WHEN city IN (${ids.map(() => '?').join(',')}) THEN ?`, args: [...ids, v] };
+    });
+    expr = `CASE ${whens.map((w) => w.sql).join(' ')} ELSE ${expr} END`;
+    args.unshift(...whens.flatMap((w) => w.args));
+  }
+  const models = Object.entries(price.models || {}).filter(([, v]) => v != null);
+  if (models.length) {
+    expr = `CASE ${models.map(() => 'WHEN model = ? THEN ?').join(' ')} ELSE ${expr} END`;
+    args.unshift(...models.flat());
+  }
+  if (expr === 'NULL') return null;
+  return { sql: `COALESCE(s_offer, cur_price, price) <= COALESCE(${expr}, 1e9)`, args };
+}
+
+export function foundQuery(f, now = Date.now(), price = {}) {
   const where = ['checked_at IS NOT NULL', 'gone = 0', 'sent_at <= ?'];
   const args = [now - Number(f.age) * DAY];
   if (f.fit === 'y') where.push('s_offer IS NOT NULL');
+  const cap = capCondition(price);
+  if (cap) {
+    where.push(cap.sql);
+    args.push(...cap.args);
+  }
   const feeds = FEEDS.filter((x) => (f.reg === '*' || x.region.key === f.reg) && (f.grp === '*' || x.group.key === f.grp));
   if (feeds.length < FEEDS.length) {
     where.push(`city IN (${feeds.map(() => '?').join(',')})`);
@@ -100,7 +130,7 @@ export function renderFound(rows, f, now = Date.now()) {
 
 /** Показать страницу: новым сообщением (команда) или правкой существующего (кнопка). */
 export async function showFound(env, f, editMessage, now = Date.now()) {
-  const q = foundQuery(f, now);
+  const q = foundQuery(f, now, await getPriceFilter(env));
   const rows = (await env.DB.prepare(q.sql).bind(...q.args).all()).results;
   const { text, markup } = renderFound(rows, f, now);
   if (editMessage) {

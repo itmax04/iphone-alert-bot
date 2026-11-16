@@ -41,12 +41,13 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
    `npx wrangler d1 execute iphone-alert-bot --remote --file db/migrations/00N_*.sql` (с разрешения владельца).
 3. Команды Telegram: `COMMANDS` в `src/commands.js` → после публикации `GET /setup?key=…`.
 4. Настройки владельца (`/mode`, `/price`, `/sell`, `/target`, `/haggle`, `/minprofit`) живут в `settings` (D1) — не зашивай их в код.
+   Потолок `/price` не переноси в адрес ленты (`preis:150:N`): `prices` и медиана должны видеть весь рынок.
 
 ## Проверка (обязательно перед тем, как сказать «готово»)
 
 ```bash
 for f in src/*.js scripts/*.js; do node --check "$f"; done
-node scripts/test_models.js && node scripts/test_market.js && node scripts/test_feeds.js && node scripts/test_select.js
+node scripts/test_models.js && node scripts/test_market.js && node scripts/test_feeds.js && node scripts/test_select.js && node scripts/test_stale.js && node scripts/test_found.js && node scripts/test_price.js
 npm run check                      # живые страницы всех 12 лент
 npm run deploy
 npm run tail                       # cron-запуски: outcome ok, без exceptions, cpuTime ≈ ≤ 10–15 мс
