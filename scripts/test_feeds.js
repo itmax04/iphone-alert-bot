@@ -4,7 +4,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { feedUrl } from '../src/kleinanzeigen.js';
-import { FEEDS, CRON_FAST, CRON_SLOW, feedFor, initState, pickNew, nextState, isNight, runFeed } from '../src/feeds.js';
+import { FEEDS, CRON_FAST, CRON_SLOW, feedFor, frequencyOf, initState, pickNew, nextState, isNight, runFeed } from '../src/feeds.js';
 import { saveMode } from '../src/settings.js';
 
 const sqlite = new DatabaseSync(':memory:');
@@ -30,20 +30,22 @@ const check = (name, got, want) => {
 // --- Адреса (форматы проверены на живом сайте 14.11.2026) ---
 const feed = (id) => FEEDS.find((f) => f.id === id);
 const B = 'https://www.kleinanzeigen.de';
-check('лент 12', FEEDS.length, 12);
+check('лент 20', FEEDS.length, 20);
 check('адрес: телефоны, Берлин', feedUrl(feed('ph-be')), `${B}/s-handy-telekom/berlin/anbieter:privat/anzeige:angebote/preis:150:/sortierung:neuste/c173l3331`);
 check('адрес: планшеты, MV, стр. 3', feedUrl(feed('tab-mv'), 3), `${B}/s-tablets-reader/mecklenburg-vorpommern/anbieter:privat/anzeige:angebote/preis:150:/seite:3/sortierung:neuste/c285l61`);
 check('адрес: MacBook, Гамбург', feedUrl(feed('mac-hh')), `${B}/s-notebooks/hamburg/anbieter:privat/anzeige:angebote/preis:150:/sortierung:neuste/macbook/k0c278l9409`);
 check('адрес: часы, Берлин, стр. 2', feedUrl(feed('aw-be'), 2), `${B}/s-wearables/berlin/anbieter:privat/anzeige:angebote/preis:150:/seite:2/sortierung:neuste/apple-watch/k0c405l3331`);
 
-// --- Расписание: за 18 минут каждая лента телефонов — 6 раз, каждая из остальных — 1 раз ---
+// --- Расписание: за 210 минут (30 циклов по 7) Берлин и Гамбург (телефоны) — по 60, SH/BB/MV — по 30; остальные 15 лент — по 7 ---
 const counts = {};
-for (let m = 0; m < 18; m++) {
+for (let m = 0; m < 210; m++) {
   const date = new Date(Date.UTC(2026, 10, 14, 12, m));
   for (const cron of m % 2 ? [CRON_FAST] : [CRON_FAST, CRON_SLOW]) counts[feedFor(cron, date).id] = (counts[feedFor(cron, date).id] || 0) + 1;
 }
-check('расписание: телефоны по 6 раз', ['ph-be', 'ph-hh', 'ph-mv'].map((id) => counts[id]), [6, 6, 6]);
-check('расписание: остальные 9 лент по разу', FEEDS.filter((f) => f.group.key !== 'ph').map((f) => counts[f.id]), Array(9).fill(1));
+check('расписание: телефоны Берлин/Гамбург по 60', ['ph-be', 'ph-hh'].map((id) => counts[id]), [60, 60]);
+check('расписание: телефоны SH/BB/MV по 30', ['ph-sh', 'ph-bb', 'ph-mv'].map((id) => counts[id]), [30, 30, 30]);
+check('расписание: остальные 15 лент по 7', FEEDS.filter((f) => f.group.key !== 'ph').map((f) => counts[f.id]), Array(15).fill(7));
+check('частота: подписи', [frequencyOf(feed('ph-be')), frequencyOf(feed('ph-sh')), frequencyOf(feed('mac-bb'))], ['раз в ~3,5 мин', 'раз в 7 мин', 'раз в 30 мин']);
 
 // --- Какие номера новые ---
 const page = (from, n) => Array.from({ length: n }, (_, i) => from - i * 10); // по убыванию, шаг 10

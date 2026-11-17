@@ -1,20 +1,20 @@
 # iPhone Alert Bot
 
 > **TL;DR (EN):** Cloudflare Worker that watches Kleinanzeigen (Germany) for private-seller listings of iPhone 11+,
-> iPad, MacBook, Apple Watch, Samsung Galaxy and Pixel (150 € and up) in three regions — Berlin, Hamburg and all of
-> Mecklenburg-Vorpommern — and sends them to a private Telegram bot. 12 feeds (3 regions × 4 groups), one page per
+> iPad, MacBook, Apple Watch, Samsung Galaxy and Pixel (150 € and up) in five regions — Berlin, Hamburg and all of
+> Mecklenburg-Vorpommern, Schleswig-Holstein and Brandenburg — and sends them to a private Telegram bot. 20 feeds (5 regions × 4 groups), one page per
 > run. Plain JavaScript (ES modules), no build step, state in Cloudflare D1. Docs are in Russian.
 
-Бот для закупки техники на перепродажу. 12 лент: 3 региона × 4 группы.
+Бот для закупки техники на перепродажу. 20 лент: 5 регионов × 4 группы.
 
 | Группа | Категория Kleinanzeigen | Что распознаётся | Как часто |
 |---|---|---|---|
-| 📱 Телефоны | `s-handy-telekom`, `c173`, без поискового слова | iPhone 11+, Samsung S21+ / Z Fold/Flip 3+, Pixel 6+ | каждая лента раз в 3 мин |
-| 📲 Планшеты | `s-tablets-reader`, `c285`, без слова | iPad | раз в 18 мин |
-| 💻 MacBook | `s-notebooks`, `c278`, слово `macbook` | MacBook на Apple Silicon | раз в 18 мин |
-| ⌚ Apple Watch | `s-wearables`, `c405`, слово `apple-watch` | Series 7+, Ultra | раз в 18 мин |
+| 📱 Телефоны | `s-handy-telekom`, `c173`, без поискового слова | iPhone 11+, Samsung S21+ / Z Fold/Flip 3+, Pixel 6+ | Berlin и Hamburg ≈ раз в 3,5 мин, SH / Brandenburg / MV раз в 7 мин |
+| 📲 Планшеты | `s-tablets-reader`, `c285`, без слова | iPad | раз в 30 мин |
+| 💻 MacBook | `s-notebooks`, `c278`, слово `macbook` | MacBook на Apple Silicon | раз в 30 мин |
+| ⌚ Apple Watch | `s-wearables`, `c405`, слово `apple-watch` | Series 7+, Ultra | раз в 30 мин |
 
-Регионы: Berlin (`l3331`), Hamburg (`l9409`), вся Mecklenburg-Vorpommern (`l61`).
+Регионы: Berlin (`l3331`), Hamburg (`l9409`), вся Mecklenburg-Vorpommern (`l61`), Schleswig-Holstein целиком (`l408`), Brandenburg целиком (`l7711`) — коды взяты из живых ссылок Kleinanzeigen 17.11.2026.
 Фильтр в URL: **только частные продавцы, только предложения о продаже, цена от 150 €**, сначала новые.
 
 **Режим.** По умолчанию — 👀 **наблюдение**: бот ничего не присылает, а считает, сколько прислал бы (`/stats`, отчёт в 21:00).
@@ -45,10 +45,10 @@
 Каждый запуск обрабатывает **одну страницу одной ленты** (лимит бесплатного тарифа — 10 мс CPU на запуск).
 
 ```
-cron "* * * * *"   3 ленты телефонов по кругу (Berlin, Hamburg, MV) — каждая раз в 3 минуты
+cron "* * * * *"   5 лент телефонов, цикл из 7 слотов (be, hh, sh, be, hh, bb, mv): Berlin и Hamburg ≈ раз в 3,5 мин, остальные раз в 7 мин
                     + отчёт 21:00, напоминание /sell по понедельникам 10:00,
                       ночью (03:20 пересчёт медиан `market`, 03:30 чистка старых записей)
-cron "*/2 * * * *" 9 остальных лент по кругу (планшеты, MacBook, Apple Watch) — каждая раз в 18 минут
+cron "*/2 * * * *" 15 остальных лент по кругу (планшеты, MacBook, Apple Watch) — каждая раз в 30 минут
 
 runFeed(feed)   [feeds.js]  страница → номера → сверка с состоянием ленты → разбор только новых
                             → каталог → цена в prices → (режим send) Telegram
@@ -58,7 +58,7 @@ POST /telegram  [commands.js] команды и кнопки
 Запросов к Kleinanzeigen — 2 160 в сутки. Время в cron — UTC; время для людей (отчёты, «день») — `Europe/Berlin`.
 
 Объём (замер 14.11.2026, суббота): телефоны Berlin ~300 новых в сутки (до 21 в час), Hamburg ~200, MV ~110;
-планшеты ~60 на три региона, MacBook ~75. Каталог распознаёт ~85 % телефонов, ~50 % планшетов, ~30 % MacBook,
+планшеты ~60 на три региона, MacBook ~75. SH и Brandenburg (с 17.11.2026) замеров ещё нет; оценка по населению — объём лент ×1,8–2 (~1 100–1 200 сообщений в сутки без отбора). Каталог распознаёт ~85 % телефонов, ~50 % планшетов, ~30 % MacBook,
 ~60–75 % часов. Без дополнительного отбора это ~575 сообщений в сутки — поэтому отправка выключена по умолчанию.
 
 ## Карта файлов: где что менять
@@ -66,7 +66,7 @@ POST /telegram  [commands.js] команды и кнопки
 ```
 src/
   index.js        cron → runFeed, отчёты, ночной пересчёт и чистка, HTTP-маршруты
-  feeds.js        12 лент (REGIONS × GROUPS), расписание (feedFor), состояние ленты, runFeed, формат сообщения
+  feeds.js        20 лент (REGIONS × GROUPS), расписание (feedFor), состояние ленты, runFeed, формат сообщения
   kleinanzeigen.js адрес ленты (feedUrl, с seite:N), загрузка страницы, разбор объявления (parseArticle)
   catalog.js      каталог моделей: распознавание и ключи (iPhone 11+, iPad, MacBook, Apple Watch, Samsung, Pixel)
   filters.js      что включено (ACTIVE_CATEGORIES, MIN_IPHONE), recognize, аккумулятор, пометки 🔧/🧩/🔁
@@ -89,7 +89,7 @@ scripts/
   test_found.js   локальный тест /found: разбор, выборка, пагинация, кнопки, план запроса
   test_stale.js   локальный тест «давно висят»: запас торга, ночные слоты, разбор страницы, перепроверка, отчёт
   test_models.js  локальный тест каталога: реальные заголовки → ключ модели, команды /sell и /price
-  check.js        живые страницы всех 12 лент: загрузка, разбор, распознавание (без Telegram/D1)
+  check.js        живые страницы всех 20 лент: загрузка, разбор, распознавание (без Telegram/D1)
 wrangler.toml     имя Worker, 2 cron, привязка D1
 ```
 
@@ -154,7 +154,7 @@ wrangler.toml     имя Worker, 2 cron, привязка D1
 (после «Итогов дня», в любом режиме `/mode`; пока перепроверок не было — молчит). Код — `src/stale.js`.
 - **Кандидат:** при записи в `items` ставится `next_at` (+7 дней), если не `flag`/`nomed` и даже при максимальном торге 30 % маржа ≥ `/target`.
 - **Ночная перепроверка (01:00–06:00 Берлин):** каждый второй запуск каждого cron вместо ленты открывает одну страницу
-  объявления (самое просроченное по `next_at`). Ленты ночью: телефоны раз в 6 мин, остальные раз в 36 мин; всего запросов к Kleinanzeigen по-прежнему 2 160 в сутки.
+  объявления (самое просроченное по `next_at`). Ленты ночью: Berlin и Hamburg (телефоны) раз в 7 мин, остальные телефоны раз в 14 мин, прочие ленты раз в 60 мин; всего запросов к Kleinanzeigen по-прежнему 2 160 в сутки.
   Ёмкость — до 225 страниц за ночь. Снятое объявление отвечает 301/404/410 → `gone`. Сбой (403, не-объявление) проверкой не считается, повтор через 3 ч.
 - **Запас торга по возрасту:** 7–9 дней — 15 %, 10–13 — 20 %, 14+ — 25 %; +5 % за уже сниженную цену (текущая < цены при первом показе);
   Festpreis в описании — 0; потолок 30 %. Подходит, если при «предложите X €» (округление до 5 €) маржа к медиане ≥ `/target` (и ≥ `/minprofit`).
@@ -184,7 +184,7 @@ wrangler.toml     имя Worker, 2 cron, привязка D1
 | Команда | Что делает |
 |---|---|
 | `/found`, `/found 14 be mac` | «🕰 Давно висят» по запросу: перепроверенные объявления 7+ / 14+ дней (цена предложения, маржа, ✍️ / 🔗), фильтры «подходят/все», регион (`be hh mv`), группа (`ph tab mac aw`), пагинация; кнопка есть и в `/feeds`; в любом режиме `/mode` |
-| `/feeds` | кнопки 12 лент → карточка: последние объявления, проверки, 🔕/🔔, ссылка поиска |
+| `/feeds` | кнопки 20 лент → карточка: последние объявления, проверки, 🔕/🔔, ссылка поиска |
 | `/mode`, `/mode send`, `/mode watch` | режим: наблюдение (только считать) или отправка |
 | `/sell 15 Pro 256 32000` | цена продажи в ₴; `/sell` — таблица и курс; `… off` — удалить; другие категории: `/sell s24 ultra 256 25000`, `/sell ipad air 5 256 lte 20000`, `/sell watch 9 45mm lte 12000`, `/sell macbook air 13 m2 16/512 40000` (диагональ, чип, RAM/SSD) |
 | `/models` | какие модели распознаются и как их писать в командах |
@@ -231,7 +231,7 @@ npx --yes wrangler@4 d1 execute iphone-alert-bot --remote --command "SELECT city
 Нужно: Node.js ≥ 20, аккаунт Cloudflare (`npx wrangler login`).
 
 ```bash
-npm run check               # живые страницы всех 12 лент (разбор + распознавание), без Telegram и D1
+npm run check               # живые страницы всех 20 лент (разбор + распознавание), без Telegram и D1
 node scripts/test_models.js # каталог моделей: реальные заголовки → ключи, команды /sell и /price
 node scripts/test_market.js # ночной пересчёт медиан
 node scripts/test_feeds.js  # ленты: адреса, расписание, новые номера, дочитывание, режимы

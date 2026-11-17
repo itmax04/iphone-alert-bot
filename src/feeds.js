@@ -1,4 +1,4 @@
-// Региональные ленты: 3 региона × 4 группы = 12 лент Kleinanzeigen (частные продавцы, продажа, от 150 €, сначала новые).
+// Региональные ленты: 5 регионов × 4 группы = 20 лент Kleinanzeigen (частные продавцы, продажа, от 150 €, сначала новые).
 // Один запуск — одна страница одной ленты. Вместо таблиц seen у каждой ленты одна строка в `feeds`:
 // порог (floor) и последние ~40 номеров объявлений выше порога (recent).
 //
@@ -18,6 +18,8 @@ export const REGIONS = [
   { key: 'be', slug: 'berlin', loc: 'l3331', name: 'Berlin' },
   { key: 'hh', slug: 'hamburg', loc: 'l9409', name: 'Hamburg' },
   { key: 'mv', slug: 'mecklenburg-vorpommern', loc: 'l61', name: 'MV' },
+  { key: 'sh', slug: 'schleswig-holstein', loc: 'l408', name: 'SH' },
+  { key: 'bb', slug: 'brandenburg', loc: 'l7711', name: 'Brandenburg' },
 ];
 
 // query — поисковое слово: без него в ноутбуках и носимой электронике почти всё чужое.
@@ -33,9 +35,13 @@ export const FEEDS = GROUPS.flatMap((group) =>
 );
 
 // Расписание. Телефоны — ~90 % всех объявлений (Берлин — до 21 в час), остальное приходит редко.
-export const CRON_FAST = '* * * * *'; // 3 ленты телефонов по кругу: каждая раз в 3 минуты
-export const CRON_SLOW = '*/2 * * * *'; // 9 остальных лент по кругу: каждая раз в 18 минут
-const FAST = FEEDS.filter((f) => f.group.key === 'ph');
+// Быстрое расписание (каждую минуту): цикл из 7 слотов, Берлин и Гамбург — по два раза (≈ раз в 3,5 мин), SH, Brandenburg и MV — раз в 7 мин.
+// Длина цикла нечётная: ночью каждый второй запуск уходит на перепроверки (src/stale.js), и каждая лента всё равно попадает в свободные слоты.
+// Медленное (каждые 2 минуты): 15 остальных лент по кругу, каждая раз в 30 минут.
+export const CRON_FAST = '* * * * *';
+export const CRON_SLOW = '*/2 * * * *';
+const PHONE_CYCLE = ['be', 'hh', 'sh', 'be', 'hh', 'bb', 'mv'];
+const FAST = PHONE_CYCLE.map((key) => FEEDS.find((f) => f.id === `ph-${key}`));
 const SLOW = FEEDS.filter((f) => f.group.key !== 'ph');
 
 /** Какую ленту проверять в этот запуск. */
@@ -45,7 +51,8 @@ export function feedFor(cron, date) {
 }
 
 export function frequencyOf(feed) {
-  return feed.group.key === 'ph' ? 'раз в 3 мин' : 'раз в 18 мин';
+  if (feed.group.key !== 'ph') return 'раз в 30 мин';
+  return PHONE_CYCLE.filter((k) => k === feed.region.key).length === 2 ? 'раз в ~3,5 мин' : 'раз в 7 мин';
 }
 
 // --- Состояние ленты: какие номера новые (чистые функции, тест — scripts/test_feeds.js) ---

@@ -264,8 +264,8 @@ async function commandHelp(env) {
   await sendText(
     env,
     '📱 <b>Alert Bot</b>\nСлежу за новыми объявлениями на Kleinanzeigen: только частные продавцы, только продажа, от 150 €.\n' +
-      'Регионы: Berlin, Hamburg, вся Mecklenburg-Vorpommern.\n\n' +
-      '📱 телефоны (iPhone 11+, Samsung, Pixel) — раз в 3 минуты\n📲 iPad · 💻 MacBook · ⌚ Apple Watch — раз в 18 минут\n\n' +
+      'Регионы: Berlin, Hamburg, вся Mecklenburg-Vorpommern, Schleswig-Holstein, Brandenburg.\n\n' +
+      '📱 телефоны (iPhone 11+, Samsung, Pixel) — Berlin и Hamburg раз в ~3,5 минуты, остальные регионы раз в 7 минут\n📲 iPad · 💻 MacBook · ⌚ Apple Watch — раз в 30 минут\n\n' +
       'Присылаю только выгодные объявления, где модель распознана однозначно (/models):\n' +
       '✅ уже выгодно — маржа к медиане рынка не меньше цели (/target, по умолчанию 20%)\n' +
       '🤝 выгодно после торга — подсказываю, сколько предложить (/haggle)\n' +

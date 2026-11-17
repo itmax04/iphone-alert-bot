@@ -81,7 +81,7 @@ for (let t = 0; t < 12 * 60; t++) {
   if (!isRecheckSlot(false, d)) seen.add(feedFor(CRON_FAST, d).id);
   if (t % 2 === 0 && !isRecheckSlot(true, d)) seen.add(feedFor(CRON_SLOW, d).id);
 }
-check('все 12 лент обходятся ночью (в слотах без перепроверки)', seen.size, 12);
+check('все 20 лент обходятся ночью (в слотах без перепроверки)', seen.size, 20);
 
 // --- Разбор страницы объявления (разметка проверена на живой странице 16.11.2026) ---
 const html = (price, desc = 'Top Zustand') =>

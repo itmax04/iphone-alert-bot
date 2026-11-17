@@ -14,7 +14,7 @@ const AGES = { 7: '7+ дней', 14: '14+ дней' };
 
 export const DEFAULT_FILTER = { age: '7', fit: 'y', reg: '*', grp: '*', page: 0 };
 
-/** «/found», «/found 14», «/found all be mac» → фильтр. Слова: 7, 14, all (не только подходящие), be/hh/mv, ph/tab/mac/aw. */
+/** «/found», «/found 14», «/found all be mac» → фильтр. Слова: 7, 14, all (не только подходящие), be/hh/mv/sh/bb, ph/tab/mac/aw. */
 export function parseFoundArgs(text) {
   const f = { ...DEFAULT_FILTER };
   for (const w of text.replace(/^\S+/, '').toLowerCase().split(/\s+/).filter(Boolean)) {
@@ -22,7 +22,7 @@ export function parseFoundArgs(text) {
     else if (w === 'all' || w === 'все') f.fit = 'n';
     else if (REGIONS.some((r) => r.key === w)) f.reg = w;
     else if (GROUPS.some((g) => g.key === w)) f.grp = w;
-    else return { error: `Не понял «${w}». Возраст: 7, 14 · все перепроверенные: all · регион: be, hh, mv · группа: ph, tab, mac, aw.` };
+    else return { error: `Не понял «${w}». Возраст: 7, 14 · все перепроверенные: all · регион: be, hh, mv, sh, bb · группа: ph, tab, mac, aw.` };
   }
   return { filter: f };
 }

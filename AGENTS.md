@@ -4,8 +4,8 @@
 
 ## Контекст в одном абзаце
 
-Cloudflare Worker (JS, ES-модули, без сборки) для закупки техники на перепродажу: 12 лент Kleinanzeigen —
-3 региона (Berlin, Hamburg, вся Mecklenburg-Vorpommern) × 4 группы (телефоны, планшеты, MacBook, Apple Watch),
+Cloudflare Worker (JS, ES-модули, без сборки) для закупки техники на перепродажу: 20 лент Kleinanzeigen —
+5 регионов (Berlin, Hamburg, вся Mecklenburg-Vorpommern, Schleswig-Holstein, Brandenburg) × 4 группы (телефоны, планшеты, MacBook, Apple Watch),
 частные продавцы, от 150 €. Модель распознаёт каталог; цена сравнивается с медианой рынка и ценами продажи владельца
 в Украине. Данные — Cloudflare D1 (`DB`). По умолчанию режим наблюдения (`/mode`): бот считает, но не присылает.
 Владелец общается по-русски; тексты бота — на русском, сообщения продавцам — на немецком.
@@ -48,7 +48,7 @@ Cloudflare Worker (JS, ES-модули, без сборки) для закупк
 ```bash
 for f in src/*.js scripts/*.js; do node --check "$f"; done
 node scripts/test_models.js && node scripts/test_market.js && node scripts/test_feeds.js && node scripts/test_select.js && node scripts/test_stale.js && node scripts/test_found.js && node scripts/test_price.js
-npm run check                      # живые страницы всех 12 лент
+npm run check                      # живые страницы всех 20 лент
 npm run deploy
 npm run tail                       # cron-запуски: outcome ok, без exceptions, cpuTime ≈ ≤ 10–15 мс
 curl "https://iphone-alert-bot.<subdomain>.workers.dev/run?key=$(cat .run_key)&feed=ph-be&debug=1"

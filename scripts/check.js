@@ -1,5 +1,5 @@
 // Локальная проверка на живых страницах: загрузка лент, разбор и распознавание (без Telegram и D1).
-//   node scripts/check.js          — все 12 лент
+//   node scripts/check.js          — все 20 лент
 //   node scripts/check.js ph-be    — одна лента (id из src/feeds.js)
 import { fetchFeed, feedUrl, parseArticle } from '../src/kleinanzeigen.js';
 import { recognize, batteryOf, tagsOf } from '../src/filters.js';

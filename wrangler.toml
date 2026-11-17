@@ -2,7 +2,7 @@ name = "iphone-alert-bot"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
-# Каждую минуту — 3 ленты телефонов по кругу; каждые 2 минуты — 9 остальных лент (планшеты, MacBook, Apple Watch)
+# Каждую минуту — 5 лент телефонов (цикл из 7 слотов); каждые 2 минуты — 15 остальных лент (планшеты, MacBook, Apple Watch)
 # (см. feedFor в src/feeds.js). Время — UTC. Все 5 бесплатных cron аккаунта заняты.
 [triggers]
 crons = ["* * * * *", "*/2 * * * *"]
